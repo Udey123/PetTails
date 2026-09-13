@@ -30,7 +30,7 @@ export function TrackingBox({ bookingId }: TrackingBoxProps) {
           table: "bookings",
           filter: `id=eq.${bookingId}`,
         },
-        (payload) => {
+        (payload: { new?: { status?: string } }) => {
           if (payload.new?.status) {
             setCurrentStatus(payload.new.status);
           }

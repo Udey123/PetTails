@@ -62,7 +62,7 @@ create policy "Owners can delete own pets"
   on pets for delete
   using (auth.uid() = owner_id);
 
-create index idx_pets_owner on pets(owner_id);
+create index if not exists idx_pets_owner on pets(owner_id);
 
 -- ============================================
 -- VETS
@@ -100,9 +100,9 @@ create policy "Vets can insert own record"
   on vets for insert
   with check (auth.uid() = user_id);
 
-create index idx_vets_user on vets(user_id);
-create index idx_vets_verified on vets(verified) where verified = true;
-create index idx_vets_accepting on vets(accepting_bookings) where accepting_bookings = true;
+create index if not exists idx_vets_user on vets(user_id);
+create index if not exists idx_vets_verified on vets(verified) where verified = true;
+create index if not exists idx_vets_accepting on vets(accepting_bookings) where accepting_bookings = true;
 
 -- ============================================
 -- AVAILABILITY
@@ -129,7 +129,7 @@ create policy "Vets can manage own availability"
     vet_id in (select id from vets where user_id = auth.uid())
   );
 
-create index idx_availability_vet on availability(vet_id);
+create index if not exists idx_availability_vet on availability(vet_id);
 
 -- ============================================
 -- BOOKINGS
@@ -178,11 +178,11 @@ create policy "Vets can update bookings assigned to them"
     vet_id in (select id from vets where user_id = auth.uid())
   );
 
-create index idx_bookings_owner on bookings(owner_id);
-create index idx_bookings_vet on bookings(vet_id);
-create index idx_bookings_pet on bookings(pet_id);
-create index idx_bookings_reference on bookings(booking_reference);
-create index idx_bookings_status on bookings(status);
+create index if not exists idx_bookings_owner on bookings(owner_id);
+create index if not exists idx_bookings_vet on bookings(vet_id);
+create index if not exists idx_bookings_pet on bookings(pet_id);
+create index if not exists idx_bookings_reference on bookings(booking_reference);
+create index if not exists idx_bookings_status on bookings(status);
 
 -- ============================================
 -- REVIEWS
@@ -218,9 +218,9 @@ create policy "Owners can view own reviews"
   on reviews for select
   using (auth.uid() = owner_id);
 
-create index idx_reviews_vet on reviews(vet_id);
-create index idx_reviews_booking on reviews(booking_id);
-create index idx_reviews_owner on reviews(owner_id);
+create index if not exists idx_reviews_vet on reviews(vet_id);
+create index if not exists idx_reviews_booking on reviews(booking_id);
+create index if not exists idx_reviews_owner on reviews(owner_id);
 
 -- ============================================
 -- PAYMENTS
@@ -250,8 +250,8 @@ create policy "System can update payments"
   on payments for update
   using (true);
 
-create index idx_payments_booking on payments(booking_id);
-create index idx_payments_user on payments(user_id);
+create index if not exists idx_payments_booking on payments(booking_id);
+create index if not exists idx_payments_user on payments(user_id);
 
 -- ============================================
 -- REALTIME
@@ -303,16 +303,54 @@ create or replace trigger on_review_created
   for each row execute function public.update_vet_rating();
 
 -- ============================================
--- SEED DATA (Demo only - marked as demo)
+-- SEED DATA (Idempotent — safe to run multiple times)
 -- ============================================
--- These are demo profiles for testing. In production, replace with real data.
--- Run this AFTER creating test users through the signup flow.
+-- Creates 5 demo vet users + profiles + verified vet records
+-- Uses ON CONFLICT so re-running never errors
 
--- Example seed (run manually):
--- insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
--- values
---   ('uuid-from-auth', 'Small animal general practice', 'Experienced in dogs and cats.', 499, 4.9, true, true, true),
---   ('uuid-from-auth', 'Canine orthopedics', 'Specialist in canine joint and bone issues.', 699, 4.8, true, true, true),
---   ('uuid-from-auth', 'Feline medicine', 'Dedicated cat specialist.', 549, 5.0, true, true, true),
---   ('uuid-from-auth', 'Exotic & avian care', 'Birds, reptiles, and exotic pets.', 799, 4.7, true, true, true),
---   ('uuid-from-auth', 'Emergency & critical care', 'Available 24/7 for emergencies.', 899, 4.9, true, true, true);
+-- Create vet auth users (skips if email already exists)
+insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
+select gen_random_uuid(), 'uday@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Uday Rathore", "role": "vet"}'::jsonb, now(), now()
+where not exists (select 1 from auth.users where email = 'uday@pettails.demo');
+
+insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
+select gen_random_uuid(), 'vanshika@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Vanshika Tripathi", "role": "vet"}'::jsonb, now(), now()
+where not exists (select 1 from auth.users where email = 'vanshika@pettails.demo');
+
+insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
+select gen_random_uuid(), 'vikas@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Vikas Lloydian", "role": "vet"}'::jsonb, now(), now()
+where not exists (select 1 from auth.users where email = 'vikas@pettails.demo');
+
+insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
+select gen_random_uuid(), 'izaan@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Izaan Lloydian", "role": "vet"}'::jsonb, now(), now()
+where not exists (select 1 from auth.users where email = 'izaan@pettails.demo');
+
+insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
+select gen_random_uuid(), 'shreya@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Shreya", "role": "vet"}'::jsonb, now(), now()
+where not exists (select 1 from auth.users where email = 'shreya@pettails.demo');
+
+-- Create verified vet records (skips if already exists)
+insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
+select id, 'Small animal general practice', 'Experienced in dogs and cats.', 499, 4.9, true, true, true
+from profiles where email = 'uday@pettails.demo'
+and not exists (select 1 from vets where user_id = (select id from profiles where email = 'uday@pettails.demo'));
+
+insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
+select id, 'Canine orthopedics', 'Specialist in canine joint and bone issues.', 699, 4.8, true, true, true
+from profiles where email = 'vanshika@pettails.demo'
+and not exists (select 1 from vets where user_id = (select id from profiles where email = 'vanshika@pettails.demo'));
+
+insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
+select id, 'Feline medicine', 'Dedicated cat specialist.', 549, 5.0, true, true, true
+from profiles where email = 'vikas@pettails.demo'
+and not exists (select 1 from vets where user_id = (select id from profiles where email = 'vikas@pettails.demo'));
+
+insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
+select id, 'Exotic & avian care', 'Birds, reptiles, and exotic pets.', 799, 4.7, true, true, true
+from profiles where email = 'izaan@pettails.demo'
+and not exists (select 1 from vets where user_id = (select id from profiles where email = 'izaan@pettails.demo'));
+
+insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
+select id, 'Emergency & critical care', 'Available 24/7 for emergencies.', 899, 4.9, true, true, true
+from profiles where email = 'shreya@pettails.demo'
+and not exists (select 1 from vets where user_id = (select id from profiles where email = 'shreya@pettails.demo'));
