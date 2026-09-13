@@ -209,6 +209,11 @@ export function VetCard({ vet, onBook }: VetCardProps) {
           }}
         >
           <span>{vet.online ? "Available now" : "Offline"}</span>
+          {vet.vet_services && vet.vet_services.length > 0 && (
+            <span style={{ marginLeft: "auto" }}>
+              {vet.vet_services.length} service{vet.vet_services.length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
 
         <div
@@ -221,7 +226,15 @@ export function VetCard({ vet, onBook }: VetCardProps) {
           }}
         >
           <div style={{ fontWeight: 700 }}>
-            {formatPrice(vet.consultation_price)}{" "}
+            {vet.vet_services && vet.vet_services.length > 0 ? (
+              <>
+                {formatPrice(Math.min(...vet.vet_services.map((s) => s.price)))}
+                {" – "}
+                {formatPrice(Math.max(...vet.vet_services.map((s) => s.price)))}
+              </>
+            ) : (
+              vet.consultation_price > 0 ? formatPrice(vet.consultation_price) : null
+            )}
             <span
               style={{
                 fontWeight: 400,
@@ -229,7 +242,7 @@ export function VetCard({ vet, onBook }: VetCardProps) {
                 fontSize: "0.8rem",
               }}
             >
-              / consult
+              {" "}/ service
             </span>
           </div>
         </div>

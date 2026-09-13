@@ -14,7 +14,7 @@ export async function GET(
 
     const { data: vet, error } = await supabase
       .from("vets")
-      .select("*, profiles!vets_user_id_fkey(name, email, phone, avatar_url)")
+      .select("*")
       .eq("id", id)
       .single();
 
@@ -22,22 +22,40 @@ export async function GET(
       return NextResponse.json({ error: "Vet not found" }, { status: 404 });
     }
 
-    // Get services
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, name, email, phone, avatar_url")
+      .eq("id", vet.user_id)
+      .single();
+
     const { data: services } = await supabase
       .from("vet_services")
       .select("*")
       .eq("vet_id", id)
       .eq("is_active", true);
 
-    // Get reviews with owner names
     const { data: reviews } = await supabase
       .from("reviews")
-      .select("*, profiles!reviews_owner_id_fkey(name)")
+      .select("*")
       .eq("vet_id", id)
       .order("created_at", { ascending: false })
       .limit(20);
 
-    // Get availability
+    const reviewOwnerIds = (reviews || []).map((r: Record<string, unknown>) => r.owner_id as string);
+    let profilesMap = new Map<string, { name: string }>();
+    if (reviewOwnerIds.length > 0) {
+      const { data: reviewProfiles } = await supabase
+        .from("profiles")
+        .select("id, name")
+        .in("id", reviewOwnerIds);
+      profilesMap = new Map((reviewProfiles || []).map((p: Record<string, unknown>) => [p.id as string, p as { name: string }]));
+    }
+
+    const enrichedReviews = (reviews || []).map((r: Record<string, unknown>) => ({
+      ...r,
+      profiles: profilesMap.get(r.owner_id as string) || null,
+    }));
+
     const { data: availability } = await supabase
       .from("vet_availability")
       .select("*")
@@ -46,8 +64,9 @@ export async function GET(
 
     return NextResponse.json({
       ...vet,
+      profiles: profile || null,
       vet_services: services || [],
-      reviews: reviews || [],
+      reviews: enrichedReviews,
       availability: availability || [],
     });
   } catch (error) {

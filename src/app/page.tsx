@@ -20,12 +20,24 @@ export default function HomePage() {
   useEffect(() => {
     const fetchVets = async () => {
       const supabase = createClient();
-      const { data } = await supabase
+      const { data: vetData } = await supabase
         .from("vets")
-        .select("*, profiles!vets_user_id_fkey(name, email)")
+        .select("*")
         .eq("verified", true)
         .eq("accepting_bookings", true);
-      if (data) setVets(data as Vet[]);
+      if (!vetData) return;
+
+      const userIds = vetData.map((v: { user_id: string }) => v.user_id);
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, name, email")
+        .in("id", userIds);
+      const profilesMap = new Map((profiles || []).map((p: { id: string }) => [p.id, p]));
+
+      setVets(vetData.map((v: Record<string, unknown>) => ({
+        ...v,
+        profiles: profilesMap.get(v.user_id as string) || null,
+      })) as Vet[]);
     };
     fetchVets();
 
@@ -50,13 +62,19 @@ export default function HomePage() {
 
       const { data: reviewsData } = await supabase
         .from("reviews")
-        .select("review_text, rating, created_at, profiles!reviews_owner_id_fkey(name)")
+        .select("review_text, rating, created_at, owner_id")
         .order("created_at", { ascending: false })
         .limit(3);
-      if (reviewsData) {
-        setRealReviews(reviewsData.map((r: { review_text: string; rating: number; created_at: string; profiles?: { name?: string } }) => ({
+      if (reviewsData && reviewsData.length > 0) {
+        const ownerIds = reviewsData.map((r: { owner_id: string }) => r.owner_id);
+        const { data: ownerProfiles } = await supabase
+          .from("profiles")
+          .select("id, name")
+          .in("id", ownerIds);
+        const ownerMap = new Map<string, { id: string; name?: string }>((ownerProfiles || []).map((p: { id: string; name?: string }) => [p.id, p]));
+        setRealReviews(reviewsData.map((r: { review_text: string; rating: number; created_at: string; owner_id: string }) => ({
           text: r.review_text,
-          name: r.profiles?.name || "Anonymous",
+          name: ownerMap.get(r.owner_id)?.name || "Anonymous",
           rating: r.rating,
           created_at: r.created_at,
         })));

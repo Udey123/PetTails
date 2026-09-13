@@ -156,7 +156,7 @@ export default function VetDashboard() {
         await Promise.all([
           supabase
             .from("bookings")
-            .select("*, pets(name, species), profiles(name)")
+            .select("*, pets(name, species)")
             .eq("vet_id", vetData.id)
             .order("scheduled_at", { ascending: false }),
           supabase
@@ -171,15 +171,38 @@ export default function VetDashboard() {
             .order("day_of_week", { ascending: true }),
           supabase
             .from("reviews")
-            .select("*, profiles(name)")
+            .select("*")
             .eq("vet_id", vetData.id)
             .order("created_at", { ascending: false }),
         ]);
 
-      setBookings(bookingsRes.data || []);
+      const bookingOwnerIds = (bookingsRes.data || []).map((b: Record<string, unknown>) => b.owner_id).filter(Boolean);
+      const reviewOwnerIds = (reviewsRes.data || []).map((r: Record<string, unknown>) => r.owner_id).filter(Boolean);
+      const allOwnerIds = [...new Set([...bookingOwnerIds, ...reviewOwnerIds])];
+
+      let ownerProfilesMap = new Map<string, { name: string }>();
+      if (allOwnerIds.length > 0) {
+        const { data: ownerProfiles } = await supabase
+          .from("profiles")
+          .select("id, name")
+          .in("id", allOwnerIds);
+        ownerProfilesMap = new Map((ownerProfiles || []).map((p: Record<string, unknown>) => [p.id as string, p as { name: string }]));
+      }
+
+      const enrichedBookings = (bookingsRes.data || []).map((b: Record<string, unknown>) => ({
+        ...b,
+        profiles: ownerProfilesMap.get(b.owner_id as string) || null,
+      }));
+
+      const enrichedReviews = (reviewsRes.data || []).map((r: Record<string, unknown>) => ({
+        ...r,
+        profiles: ownerProfilesMap.get(r.owner_id as string) || null,
+      }));
+
+      setBookings(enrichedBookings);
       setServices(servicesRes.data || []);
       setAvailability(availRes.data || []);
-      setReviews(reviewsRes.data || []);
+      setReviews(enrichedReviews);
       setLoading(false);
     };
     load();

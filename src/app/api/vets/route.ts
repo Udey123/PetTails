@@ -7,31 +7,34 @@ export async function GET() {
 
     const { data: { user } } = await supabase.auth.getUser();
 
-    let query = supabase
+    const { data: vets, error } = await supabase
       .from("vets")
-      .select("*, profiles!vets_user_id_fkey(name, email)")
+      .select("*")
       .eq("verified", true)
       .eq("accepting_bookings", true);
-
-    if (user) {
-      const { data: myVet } = await supabase
-        .from("vets")
-        .select("id")
-        .eq("user_id", user.id)
-        .single();
-
-      if (myVet) {
-        query = query.or(`id.eq.${myVet.id}`);
-      }
-    }
-
-    const { data: vets, error } = await query;
 
     if (error) {
       return NextResponse.json({ error: "Failed to fetch vets" }, { status: 500 });
     }
 
-    return NextResponse.json(vets);
+    if (!vets || vets.length === 0) {
+      return NextResponse.json([]);
+    }
+
+    const userIds = vets.map((v: { user_id: string }) => v.user_id);
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("id, name, email, avatar_url")
+      .in("id", userIds);
+
+    const profilesMap = new Map((profiles || []).map((p: { id: string }) => [p.id, p]));
+
+    const enriched = vets.map((vet: Record<string, unknown>) => ({
+      ...vet,
+      profiles: profilesMap.get(vet.user_id as string) || null,
+    }));
+
+    return NextResponse.json(enriched);
   } catch (error) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
