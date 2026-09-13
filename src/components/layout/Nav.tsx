@@ -128,7 +128,7 @@ export function Nav() {
             How it works
           </Link>
           <Link
-            href="/#vets"
+            href="/vets"
             style={{
               textDecoration: "none",
               color: "var(--ink-soft)",
@@ -241,7 +241,7 @@ export function Nav() {
           <Link href="/#how" onClick={() => setMobileOpen(false)}>
             How it works
           </Link>
-          <Link href="/#vets" onClick={() => setMobileOpen(false)}>
+          <Link href="/vets" onClick={() => setMobileOpen(false)}>
             Find a vet
           </Link>
           <Link href="/#pricing" onClick={() => setMobileOpen(false)}>

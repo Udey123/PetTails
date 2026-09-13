@@ -42,21 +42,23 @@ function SignupForm() {
       return;
     }
 
-    if (data.user) {
+      if (data.user) {
       if (role === "vet") {
         await supabase.from("vets").insert({
           user_id: data.user.id,
           specialization: specialization || "General practice",
           consultation_price: 499,
           verified: false,
+          verification_status: "pending",
           online: false,
           accepting_bookings: false,
+          onboarding_completed: false,
         });
       }
 
       // Check if email is already confirmed (e.g. if confirm is disabled in Supabase)
       if (data.user.email_confirmed_at) {
-        router.push(role === "vet" ? "/dashboard/vet" : "/dashboard/owner");
+        router.push(role === "vet" ? "/dashboard/vet/onboarding" : "/dashboard/owner");
       } else {
         // Show verification modal
         setSignedUpEmail(email);
@@ -72,7 +74,7 @@ function SignupForm() {
   };
 
   const handleVerified = (verifiedRole: "owner" | "vet") => {
-    router.push(verifiedRole === "vet" ? "/dashboard/vet" : "/dashboard/owner");
+    router.push(verifiedRole === "vet" ? "/dashboard/vet/onboarding" : "/dashboard/owner");
   };
 
   return (

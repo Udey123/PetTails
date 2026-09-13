@@ -225,6 +225,15 @@ export default function HomePage() {
             <p>Every vet is licensed and background-checked before joining the network. Availability updates live.</p>
           </div>
           <VetGrid vets={vets} onBookVet={setSelectedVet} />
+          <div style={{ textAlign: "center", marginTop: 32 }}>
+            <a
+              href="/vets"
+              className="btn-secondary"
+              style={{ textDecoration: "none", display: "inline-block" }}
+            >
+              Browse all vets
+            </a>
+          </div>
         </div>
       </section>
 

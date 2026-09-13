@@ -19,11 +19,15 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { vet_id, pet_id, service_type, scheduled_at, concern } = body;
+    const { vet_id, pet_id, service_type, service_id, scheduled_at, concern, urgency, symptoms, duration_minutes } = body;
 
     if (!vet_id || !pet_id || !service_type || !scheduled_at) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
+
+    // Validate urgency is a valid value
+    const validUrgencies = ["routine", "soon", "urgent", "emergency"];
+    const bookingUrgency = validUrgencies.includes(urgency) ? urgency : "routine";
 
     // Validate pet belongs to owner
     const { data: pet, error: petError } = await supabase
@@ -40,11 +44,11 @@ export async function POST(request: Request) {
     // Validate vet exists and is verified
     const { data: vet, error: vetError } = await supabase
       .from("vets")
-      .select("id, consultation_price, verified")
+      .select("id, consultation_price, verified, verification_status")
       .eq("id", vet_id)
       .single();
 
-    if (vetError || !vet || !vet.verified) {
+    if (vetError || !vet || (!vet.verified && vet.verification_status !== "verified")) {
       return NextResponse.json({ error: "Vet not found or not verified" }, { status: 404 });
     }
 
@@ -63,19 +67,39 @@ export async function POST(request: Request) {
 
     // Create booking
     const bookingReference = generateRef();
+
+    // Server-side price validation: never trust frontend price
+    let bookingPrice = vet.consultation_price;
+    if (service_id) {
+      const { data: service } = await supabase
+        .from("vet_services")
+        .select("price")
+        .eq("id", service_id)
+        .eq("vet_id", vet_id)
+        .single();
+      if (service) {
+        bookingPrice = service.price;
+      }
+    }
+
     const { data: booking, error: bookingError } = await supabase
       .from("bookings")
       .insert({
         owner_id: user.id,
         vet_id,
         pet_id,
+        service_id: service_id || null,
         service_type,
+        booking_type: service_type,
+        urgency: bookingUrgency,
         scheduled_at,
+        duration_minutes: duration_minutes || 30,
         status: "pending",
-        price: vet.consultation_price,
+        price: bookingPrice,
         payment_status: "pending",
         booking_reference: bookingReference,
         concern: concern || null,
+        symptoms: symptoms || null,
       })
       .select()
       .single();
