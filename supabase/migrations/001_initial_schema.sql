@@ -73,7 +73,7 @@ create table if not exists vets (
   specialization text not null default 'General practice',
   bio text,
   consultation_price integer not null default 499,
-  rating numeric(2,1) not null default 4.0,
+  rating numeric(2,1) not null default 0,
   verified boolean not null default false,
   online boolean not null default false,
   accepting_bookings boolean not null default false,
@@ -302,55 +302,5 @@ create or replace trigger on_review_created
   after insert on reviews
   for each row execute function public.update_vet_rating();
 
--- ============================================
--- SEED DATA (Idempotent — safe to run multiple times)
--- ============================================
--- Creates 5 demo vet users + profiles + verified vet records
--- Uses ON CONFLICT so re-running never errors
-
--- Create vet auth users (skips if email already exists)
-insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
-select gen_random_uuid(), 'uday@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Uday Rathore", "role": "vet"}'::jsonb, now(), now()
-where not exists (select 1 from auth.users where email = 'uday@pettails.demo');
-
-insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
-select gen_random_uuid(), 'vanshika@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Vanshika Tripathi", "role": "vet"}'::jsonb, now(), now()
-where not exists (select 1 from auth.users where email = 'vanshika@pettails.demo');
-
-insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
-select gen_random_uuid(), 'vikas@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Vikas Lloydian", "role": "vet"}'::jsonb, now(), now()
-where not exists (select 1 from auth.users where email = 'vikas@pettails.demo');
-
-insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
-select gen_random_uuid(), 'izaan@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Izaan Lloydian", "role": "vet"}'::jsonb, now(), now()
-where not exists (select 1 from auth.users where email = 'izaan@pettails.demo');
-
-insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
-select gen_random_uuid(), 'shreya@pettails.demo', crypt('demo1234', gen_salt('bf')), now(), '{"name": "Shreya", "role": "vet"}'::jsonb, now(), now()
-where not exists (select 1 from auth.users where email = 'shreya@pettails.demo');
-
--- Create verified vet records (skips if already exists)
-insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
-select id, 'Small animal general practice', 'Experienced in dogs and cats.', 499, 4.9, true, true, true
-from profiles where email = 'uday@pettails.demo'
-and not exists (select 1 from vets where user_id = (select id from profiles where email = 'uday@pettails.demo'));
-
-insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
-select id, 'Canine orthopedics', 'Specialist in canine joint and bone issues.', 699, 4.8, true, true, true
-from profiles where email = 'vanshika@pettails.demo'
-and not exists (select 1 from vets where user_id = (select id from profiles where email = 'vanshika@pettails.demo'));
-
-insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
-select id, 'Feline medicine', 'Dedicated cat specialist.', 549, 5.0, true, true, true
-from profiles where email = 'vikas@pettails.demo'
-and not exists (select 1 from vets where user_id = (select id from profiles where email = 'vikas@pettails.demo'));
-
-insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
-select id, 'Exotic & avian care', 'Birds, reptiles, and exotic pets.', 799, 4.7, true, true, true
-from profiles where email = 'izaan@pettails.demo'
-and not exists (select 1 from vets where user_id = (select id from profiles where email = 'izaan@pettails.demo'));
-
-insert into vets (user_id, specialization, bio, consultation_price, rating, verified, online, accepting_bookings)
-select id, 'Emergency & critical care', 'Available 24/7 for emergencies.', 899, 4.9, true, true, true
-from profiles where email = 'shreya@pettails.demo'
-and not exists (select 1 from vets where user_id = (select id from profiles where email = 'shreya@pettails.demo'));
+-- Seed data removed: all vets register through the signup/onboarding flow.
+-- Production starts with zero vets.

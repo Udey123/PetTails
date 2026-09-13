@@ -47,7 +47,7 @@ function SignupForm() {
         await supabase.from("vets").insert({
           user_id: data.user.id,
           specialization: specialization || "General practice",
-          consultation_price: 499,
+          consultation_price: 0,
           verified: false,
           verification_status: "pending",
           online: false,

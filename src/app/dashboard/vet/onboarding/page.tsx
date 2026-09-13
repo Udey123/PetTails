@@ -164,7 +164,7 @@ export default function VetOnboarding() {
           .insert({
             user_id: user.id,
             specialization: "General practice",
-            consultation_price: 499,
+            consultation_price: 0,
             verified: false,
             online: false,
             accepting_bookings: false,
@@ -448,7 +448,7 @@ export default function VetOnboarding() {
                 .insert({
                   user_id: user.id,
                   specialization: "General practice",
-                  consultation_price: 499,
+                  consultation_price: 0,
                   verified: false,
                   online: false,
                   accepting_bookings: false,

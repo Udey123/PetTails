@@ -11,6 +11,11 @@ export default function HomePage() {
   const [selectedVet, setSelectedVet] = useState<Vet | null>(null);
   const [visitType, setVisitType] = useState("video_consult");
   const [triageVisible, setTriageVisible] = useState(false);
+  const [vetCount, setVetCount] = useState<number | null>(null);
+  const [reviewCount, setReviewCount] = useState<number | null>(null);
+  const [bookingCount, setBookingCount] = useState<number | null>(null);
+  const [avgRating, setAvgRating] = useState<string | null>(null);
+  const [realReviews, setRealReviews] = useState<{ text: string; name: string; rating: number; created_at: string }[]>([]);
 
   useEffect(() => {
     const fetchVets = async () => {
@@ -23,6 +28,41 @@ export default function HomePage() {
       if (data) setVets(data as Vet[]);
     };
     fetchVets();
+
+    const fetchStats = async () => {
+      const supabase = createClient();
+      const [vetRes, reviewRes, bookingRes] = await Promise.all([
+        supabase.from("vets").select("id", { count: "exact", head: true }).eq("verified", true),
+        supabase.from("reviews").select("id", { count: "exact", head: true }),
+        supabase.from("bookings").select("id", { count: "exact", head: true }).eq("status", "completed"),
+      ]);
+      setVetCount(vetRes.count ?? 0);
+      setReviewCount(reviewRes.count ?? 0);
+      setBookingCount(bookingRes.count ?? 0);
+
+      const { data: ratingData } = await supabase.from("vets").select("rating").eq("verified", true).gt("rating", 0);
+      if (ratingData && ratingData.length > 0) {
+        const avg = ratingData.reduce((sum: number, v: { rating: number | null }) => sum + (v.rating || 0), 0) / ratingData.length;
+        setAvgRating(avg.toFixed(1) + "/5");
+      } else {
+        setAvgRating(null);
+      }
+
+      const { data: reviewsData } = await supabase
+        .from("reviews")
+        .select("review_text, rating, created_at, profiles!reviews_owner_id_fkey(name)")
+        .order("created_at", { ascending: false })
+        .limit(3);
+      if (reviewsData) {
+        setRealReviews(reviewsData.map((r: { review_text: string; rating: number; created_at: string; profiles?: { name?: string } }) => ({
+          text: r.review_text,
+          name: r.profiles?.name || "Anonymous",
+          rating: r.rating,
+          created_at: r.created_at,
+        })));
+      }
+    };
+    fetchStats();
   }, []);
 
   return (
@@ -154,19 +194,19 @@ export default function HomePage() {
       <div style={{ borderBottom: "1px solid var(--line)" }}>
         <div className="wrap" style={{ display: "flex", flexWrap: "wrap", gap: 40, padding: "26px 32px" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.4rem" }}>1,240+</span>
+            <span style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.4rem" }}>{vetCount || "—"}</span>
             <span style={{ fontSize: "0.88rem", color: "var(--ink-soft)" }}>licensed vets on the network</span>
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.4rem" }}>18 min</span>
-            <span style={{ fontSize: "0.88rem", color: "var(--ink-soft)" }}>average time to match</span>
+            <span style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.4rem" }}>{reviewCount || "—"}</span>
+            <span style={{ fontSize: "0.88rem", color: "var(--ink-soft)" }}>pet-owner reviews</span>
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.4rem" }}>42</span>
-            <span style={{ fontSize: "0.88rem", color: "var(--ink-soft)" }}>cities covered</span>
+            <span style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.4rem" }}>{bookingCount || "—"}</span>
+            <span style={{ fontSize: "0.88rem", color: "var(--ink-soft)" }}>consultations completed</span>
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.4rem" }}>4.9/5</span>
+            <span style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.4rem" }}>{avgRating || "—"}</span>
             <span style={{ fontSize: "0.88rem", color: "var(--ink-soft)" }}>average pet-owner rating</span>
           </div>
         </div>
@@ -248,12 +288,12 @@ export default function HomePage() {
             <div className="card" style={{ padding: 26 }}>
               <h3>Video consult</h3>
               <div style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.9rem", margin: "12px 0 16px" }}>
-                ₹499<span style={{ fontSize: "0.9rem", fontWeight: 400, color: "var(--ink-soft)" }}>/visit</span>
+                Set by vet
               </div>
               <ul style={{ listStyle: "none", padding: 0, margin: "0 0 20px", display: "flex", flexDirection: "column", gap: 9 }}>
-                <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>15-minute video call</li>
+                <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>Video call with a licensed vet</li>
                 <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>Written care plan after</li>
-                <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>Free 48-hr follow-up message</li>
+                <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>Follow-up messaging</li>
               </ul>
               <button className="btn-secondary" style={{ width: "100%" }} onClick={() => document.getElementById("hail")?.scrollIntoView({ behavior: "smooth" })}>Choose video</button>
             </div>
@@ -261,7 +301,7 @@ export default function HomePage() {
               <span style={{ position: "absolute", top: -12, left: 24, background: "var(--amber)", color: "var(--deep-2)", fontSize: "0.72rem", fontWeight: 700, padding: "5px 10px", borderRadius: 100 }}>Most booked</span>
               <h3>Home visit</h3>
               <div style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.9rem", margin: "12px 0 16px" }}>
-                ₹899<span style={{ fontSize: "0.9rem", fontWeight: 400, color: "var(--ink-soft)" }}>/visit</span>
+                Set by vet
               </div>
               <ul style={{ listStyle: "none", padding: 0, margin: "0 0 20px", display: "flex", flexDirection: "column", gap: 9 }}>
                 <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>Vet at your door, no carrier needed</li>
@@ -273,11 +313,11 @@ export default function HomePage() {
             <div className="card" style={{ padding: 26 }}>
               <h3>Emergency</h3>
               <div style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "1.9rem", margin: "12px 0 16px" }}>
-                ₹1,299<span style={{ fontSize: "0.9rem", fontWeight: 400, color: "var(--ink-soft)" }}>/visit</span>
+                Set by vet
               </div>
               <ul style={{ listStyle: "none", padding: 0, margin: "0 0 20px", display: "flex", flexDirection: "column", gap: 9 }}>
                 <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>Priority match, skips the queue</li>
-                <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>Available 24/7</li>
+                <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>Available for urgent needs</li>
                 <li style={{ fontSize: "0.9rem", color: "var(--ink-soft)", paddingLeft: 16, position: "relative" }}><span style={{ position: "absolute", left: 0, color: "var(--amber-dark)" }}>—</span>Nearest 24-hr clinic as backup</li>
               </ul>
               <button className="btn-secondary" style={{ width: "100%" }} onClick={() => document.getElementById("hail")?.scrollIntoView({ behavior: "smooth" })}>Choose emergency</button>
@@ -286,7 +326,7 @@ export default function HomePage() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, border: "1px solid var(--line)", borderRadius: "var(--radius-m)", background: "var(--paper-2)", padding: "22px 26px" }}>
             <div>
               <h3 style={{ marginBottom: 6 }}>PetTails Plus</h3>
-              <p style={{ color: "var(--ink-soft)", fontSize: "0.94rem", margin: 0 }}>₹299/month — unlimited video consults, 20% off home visits, priority matching.</p>
+              <p style={{ color: "var(--ink-soft)", fontSize: "0.94rem", margin: 0 }}>Subscription plan — unlimited video consults, discounts on home visits, priority matching.</p>
             </div>
             <button className="btn-primary" style={{ opacity: 0.6, cursor: "not-allowed" }} disabled title="Coming soon">Coming soon</button>
           </div>
@@ -321,28 +361,30 @@ export default function HomePage() {
         <div className="wrap">
           <div className="section-head">
             <h2>Pet owners on PetTails</h2>
-            <p>Real feedback after real visits, filterable by rating.</p>
+            <p>Real feedback after real visits.</p>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 22 }} className="quotes-grid">
-            {[
-              { text: "Our dog wouldn't touch his food at 9pm on a Sunday. Had a vet on video in under fifteen minutes.", name: "Riya M.", pet: "Owner of Bruno, Labrador", rating: 5 },
-              { text: "My cat hates carriers. A vet came to the flat instead — first time she didn't hide under the bed.", name: "Arjun K.", pet: "Owner of Momo, cat", rating: 5 },
-              { text: "Booking felt like calling a cab, not fighting a clinic's phone line. That alone is worth it.", name: "Sana P.", pet: "Owner of two rescue pups", rating: 4 },
-            ].map((q) => (
-              <div key={q.name} className="card" style={{ padding: 26, display: "flex", flexDirection: "column", gap: 16 }}>
-                <p style={{ fontSize: "1.02rem" }}>&quot;{q.text}&quot;</p>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--paper-2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "0.9rem", color: "var(--deep)" }}>
-                    {q.name.charAt(0)}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: "0.92rem" }}>{q.name}</div>
-                    <div style={{ fontSize: "0.82rem", color: "var(--ink-soft)" }}>{q.pet} · ★{q.rating}.0</div>
+          {realReviews.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 0", color: "var(--ink-soft)", fontSize: "0.95rem" }}>
+              No reviews yet. Reviews appear after completed consultations.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 22 }} className="quotes-grid">
+              {realReviews.map((q, i) => (
+                <div key={i} className="card" style={{ padding: 26, display: "flex", flexDirection: "column", gap: 16 }}>
+                  <p style={{ fontSize: "1.02rem" }}>&quot;{q.text}&quot;</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--paper-2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-fraunces), Fraunces, serif", fontWeight: 600, fontSize: "0.9rem", color: "var(--deep)" }}>
+                      {q.name.charAt(0)}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: "0.92rem" }}>{q.name}</div>
+                      <div style={{ fontSize: "0.82rem", color: "var(--ink-soft)" }}>★{q.rating}.0</div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -364,9 +406,9 @@ export default function HomePage() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
             {[
-              { num: "₹1,800+", label: "average earned per video consult" },
               { num: "You choose", label: "your hours, radius, and rates" },
-              { num: "48 hrs", label: "typical time to get verified" },
+              { num: "Set your price", label: "for video consults and home visits" },
+              { num: "Fast verification", label: "to start receiving bookings" },
             ].map((s) => (
               <div key={s.label} style={{ borderLeft: "3px solid var(--amber)", paddingLeft: 16 }}>
                 <div style={{ fontFamily: "var(--font-fraunces), Fraunces, serif", fontSize: "1.6rem", fontWeight: 600 }}>{s.num}</div>

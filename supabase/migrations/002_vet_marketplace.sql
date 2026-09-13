@@ -38,8 +38,6 @@ ALTER TABLE vets ADD COLUMN IF NOT EXISTS onboarding_completed boolean NOT NULL 
 
 -- Drop the old single-price column (keep data in vet_services instead)
 -- We keep consultation_price as a fallback/default
-ALTER TABLE vets DROP CONSTRAINT IF EXISTS vets_consultation_price_check;
-ALTER TABLE vets ALTER COLUMN consultation_price SET DEFAULT 499;
 
 -- ============================================
 -- VET SERVICES
@@ -269,24 +267,5 @@ CREATE OR REPLACE TRIGGER on_vet_update
 ALTER PUBLICATION supabase_realtime ADD TABLE vet_services;
 ALTER PUBLICATION supabase_realtime ADD TABLE vet_availability;
 
--- ============================================
--- DEMO VET SERVICES (for existing demo vets)
--- ============================================
-INSERT INTO vet_services (vet_id, service_type, title, description, price, duration_minutes, is_active)
-SELECT v.id, 'video_consult', 'Video Consultation', '15-minute video call with the vet', 499, 30, true
-FROM vets v WHERE v.specialization = 'Small animal general practice'
-AND NOT EXISTS (SELECT 1 FROM vet_services WHERE vet_id = v.id AND service_type = 'video_consult');
-
-INSERT INTO vet_services (vet_id, service_type, title, description, price, duration_minutes, is_active)
-SELECT v.id, 'home_visit', 'Home Visit', 'Vet visits your home for examination', 899, 45, true
-FROM vets v WHERE v.specialization = 'Small animal general practice'
-AND NOT EXISTS (SELECT 1 FROM vet_services WHERE vet_id = v.id AND service_type = 'home_visit');
-
-INSERT INTO vet_services (vet_id, service_type, title, description, price, duration_minutes, is_active)
-SELECT v.id, 'emergency', 'Emergency Consultation', 'Priority matching for urgent cases', 1299, 30, true
-FROM vets v WHERE v.specialization = 'Small animal general practice'
-AND NOT EXISTS (SELECT 1 FROM vet_services WHERE vet_id = v.id AND service_type = 'emergency');
-
--- Mark all demo vets as having completed onboarding
-UPDATE vets SET onboarding_completed = true, verification_status = 'verified', verified_at = now()
-WHERE user_id IN (SELECT id FROM profiles WHERE email LIKE '%@pettails.demo');
+-- Seed data removed: all services are created by vets during onboarding.
+-- Production starts with zero services.

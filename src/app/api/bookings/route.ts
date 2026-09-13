@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient, getServiceClient } from "@/lib/supabase/server";
 import { v4 as uuidv4 } from "uuid";
+import { randomBytes } from "crypto";
 
 function generateRef(): string {
-  const num = Math.floor(10000 + Math.random() * 89999);
-  return `VT-${num}`;
+  const bytes = randomBytes(4).toString("hex");
+  return `VT-${bytes}`;
 }
 
 export async function POST(request: Request) {

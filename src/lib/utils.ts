@@ -4,15 +4,6 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
 }
 
-export function generateBookingReference(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let ref = 'VT-';
-  for (let i = 0; i < 8; i++) {
-    ref += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return ref;
-}
-
 export function formatPrice(price: number): string {
   return `₹${price.toLocaleString('en-IN')}`;
 }
