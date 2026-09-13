@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import {
@@ -116,100 +116,109 @@ export default function VetDashboard() {
   const [editingService, setEditingService] = useState<VetService | null>(null);
   const [showServiceForm, setShowServiceForm] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const vetIdRef = useRef<string | null>(null);
 
   const supabase = createClient();
   const router = useRouter();
 
+  const safeQuery = useCallback(async <T,>(promise: Promise<{ data: T | null; error: unknown }>): Promise<T | null> => {
+    try {
+      const { data, error } = await promise;
+      if (error) {
+        console.warn("Query warning:", error);
+      }
+      return data;
+    } catch (e) {
+      console.warn("Query failed (table may not exist):", e);
+      return null;
+    }
+  }, []);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type Any = any;
+
+  const loadDashboard = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      router.push("/auth/login");
+      return;
+    }
+
+    const vetData = await safeQuery<Vet>(
+      supabase.from("vets").select("*").eq("user_id", user.id).single()
+    );
+
+    if (!vetData) {
+      router.push("/dashboard/vet/onboarding");
+      return;
+    }
+
+    if (vetData.onboarding_completed === false && "onboarding_completed" in vetData) {
+      router.push("/dashboard/vet/onboarding");
+      return;
+    }
+
+    setVet(vetData);
+    setOnline(vetData.online);
+    setAccepting(vetData.accepting_bookings);
+    vetIdRef.current = vetData.id;
+
+    const bookingsData = await safeQuery<Any[]>(
+      supabase.from("bookings").select("*, pets(name, species)").eq("vet_id", vetData.id).order("scheduled_at", { ascending: false })
+    );
+
+    const servicesData = await safeQuery<VetService[]>(
+      supabase.from("vet_services").select("*").eq("vet_id", vetData.id).order("created_at", { ascending: false })
+    );
+
+    const availData = await safeQuery<VetAvailability[]>(
+      supabase.from("vet_availability").select("*").eq("vet_id", vetData.id).order("day_of_week", { ascending: true })
+    );
+
+    const reviewsData = await safeQuery<Any[]>(
+      supabase.from("reviews").select("*").eq("vet_id", vetData.id).order("created_at", { ascending: false })
+    );
+
+    const bookingOwnerIds = (bookingsData || []).map((b) => b.owner_id as string).filter(Boolean);
+    const reviewOwnerIds = (reviewsData || []).map((r) => r.owner_id as string).filter(Boolean);
+    const allOwnerIds = [...new Set([...bookingOwnerIds, ...reviewOwnerIds])];
+
+    let ownerProfilesMap = new Map<string, { name: string }>();
+    if (allOwnerIds.length > 0) {
+      const ownerProfiles = await safeQuery<{ id: string; name: string }[]>(
+        supabase.from("profiles").select("id, name").in("id", allOwnerIds)
+      );
+      ownerProfilesMap = new Map((ownerProfiles || []).map((p) => [p.id, p]));
+    }
+
+    const enrichedBookings = (bookingsData || []).map((b) => ({
+      ...b,
+      profiles: ownerProfilesMap.get(b.owner_id as string) || null,
+    }));
+
+    const enrichedReviews = (reviewsData || []).map((r) => ({
+      ...r,
+      profiles: ownerProfilesMap.get(r.owner_id as string) || null,
+    }));
+
+    setBookings(enrichedBookings);
+    setServices(servicesData || []);
+    setAvailability(availData || []);
+    setReviews(enrichedReviews);
+    setLoading(false);
+  }, [supabase, router, safeQuery]);
+
   useEffect(() => {
-    const load = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        router.push("/auth/login");
-        return;
-      }
+    loadDashboard();
+  }, [loadDashboard]);
 
-      const { data: vetData } = await supabase
-        .from("vets")
-        .select("*")
-        .eq("user_id", user.id)
-        .single();
+  // Realtime subscription — separate useEffect, depends only on vet ID
+  useEffect(() => {
+    if (!vetIdRef.current) return;
 
-      if (!vetData) {
-        router.push("/dashboard/vet/onboarding");
-        return;
-      }
-
-      // onboarding_completed may not exist if migration 002 hasn't run
-      // If the column is missing, vetData.onboarding_completed is undefined (falsy)
-      // Only redirect if the column EXISTS and is explicitly false
-      if (vetData.onboarding_completed === false && "onboarding_completed" in vetData) {
-        router.push("/dashboard/vet/onboarding");
-        return;
-      }
-
-      setVet(vetData);
-      setOnline(vetData.online);
-      setAccepting(vetData.accepting_bookings);
-
-      const [bookingsRes, servicesRes, availRes, reviewsRes] =
-        await Promise.all([
-          supabase
-            .from("bookings")
-            .select("*, pets(name, species)")
-            .eq("vet_id", vetData.id)
-            .order("scheduled_at", { ascending: false }),
-          supabase
-            .from("vet_services")
-            .select("*")
-            .eq("vet_id", vetData.id)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("vet_availability")
-            .select("*")
-            .eq("vet_id", vetData.id)
-            .order("day_of_week", { ascending: true }),
-          supabase
-            .from("reviews")
-            .select("*")
-            .eq("vet_id", vetData.id)
-            .order("created_at", { ascending: false }),
-        ]);
-
-      const bookingOwnerIds = (bookingsRes.data || []).map((b: Record<string, unknown>) => b.owner_id).filter(Boolean);
-      const reviewOwnerIds = (reviewsRes.data || []).map((r: Record<string, unknown>) => r.owner_id).filter(Boolean);
-      const allOwnerIds = [...new Set([...bookingOwnerIds, ...reviewOwnerIds])];
-
-      let ownerProfilesMap = new Map<string, { name: string }>();
-      if (allOwnerIds.length > 0) {
-        const { data: ownerProfiles } = await supabase
-          .from("profiles")
-          .select("id, name")
-          .in("id", allOwnerIds);
-        ownerProfilesMap = new Map((ownerProfiles || []).map((p: Record<string, unknown>) => [p.id as string, p as { name: string }]));
-      }
-
-      const enrichedBookings = (bookingsRes.data || []).map((b: Record<string, unknown>) => ({
-        ...b,
-        profiles: ownerProfilesMap.get(b.owner_id as string) || null,
-      }));
-
-      const enrichedReviews = (reviewsRes.data || []).map((r: Record<string, unknown>) => ({
-        ...r,
-        profiles: ownerProfilesMap.get(r.owner_id as string) || null,
-      }));
-
-      setBookings(enrichedBookings);
-      setServices(servicesRes.data || []);
-      setAvailability(availRes.data || []);
-      setReviews(enrichedReviews);
-      setLoading(false);
-    };
-    load();
-
-    // Realtime subscriptions
-    if (!vet) return;
+    const vid = vetIdRef.current;
 
     const channel = supabase
       .channel("vet-dashboard")
@@ -217,12 +226,9 @@ export default function VetDashboard() {
         "postgres_changes",
         { event: "*", schema: "public", table: "vet_services" },
         async () => {
-          if (!vet) return;
-          const { data } = await supabase
-            .from("vet_services")
-            .select("*")
-            .eq("vet_id", vet.id)
-            .order("created_at", { ascending: false });
+          const data = await safeQuery<VetService[]>(
+            supabase.from("vet_services").select("*").eq("vet_id", vid).order("created_at", { ascending: false })
+          );
           setServices(data || []);
         }
       )
@@ -230,12 +236,9 @@ export default function VetDashboard() {
         "postgres_changes",
         { event: "*", schema: "public", table: "vet_availability" },
         async () => {
-          if (!vet) return;
-          const { data } = await supabase
-            .from("vet_availability")
-            .select("*")
-            .eq("vet_id", vet.id)
-            .order("day_of_week", { ascending: true });
+          const data = await safeQuery<VetAvailability[]>(
+            supabase.from("vet_availability").select("*").eq("vet_id", vid).order("day_of_week", { ascending: true })
+          );
           setAvailability(data || []);
         }
       )
@@ -243,23 +246,19 @@ export default function VetDashboard() {
         "postgres_changes",
         { event: "*", schema: "public", table: "bookings" },
         async () => {
-          if (!vet) return;
-          const { data } = await supabase
-            .from("bookings")
-            .select("*, pets(name, species)")
-            .eq("vet_id", vet.id)
-            .order("scheduled_at", { ascending: false });
+          const data = await safeQuery<Any[]>(
+            supabase.from("bookings").select("*, pets(name, species)").eq("vet_id", vid).order("scheduled_at", { ascending: false })
+          );
           if (data) {
-            const ownerIds = data.map((b: Record<string, unknown>) => b.owner_id as string).filter(Boolean);
+            const ownerIds = data.map((b) => b.owner_id as string).filter(Boolean);
             let ownerMap = new Map<string, { name: string }>();
             if (ownerIds.length > 0) {
-              const { data: owners } = await supabase
-                .from("profiles")
-                .select("id, name")
-                .in("id", ownerIds);
-              ownerMap = new Map((owners || []).map((p: Record<string, unknown>) => [p.id as string, p as { name: string }]));
+              const owners = await safeQuery<{ id: string; name: string }[]>(
+                supabase.from("profiles").select("id, name").in("id", ownerIds)
+              );
+              ownerMap = new Map((owners || []).map((p) => [p.id, p]));
             }
-            setBookings(data.map((b: Record<string, unknown>) => ({
+            setBookings(data.map((b) => ({
               ...b,
               profiles: ownerMap.get(b.owner_id as string) || null,
             })));
@@ -271,7 +270,7 @@ export default function VetDashboard() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, router, vet?.id]);
+  }, [supabase, safeQuery]);
 
   const updateBookingStatus = async (bookingId: string, status: string) => {
     await supabase.from("bookings").update({ status }).eq("id", bookingId);

@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+async function safeQuery<T>(promise: Promise<{ data: T | null; error: unknown }>): Promise<T | null> {
+  try {
+    const { data, error } = await promise;
+    if (error) console.warn("Query warning:", error);
+    return data;
+  } catch (e) {
+    console.warn("Query failed (table may not exist):", e);
+    return null;
+  }
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -12,55 +23,43 @@ export async function GET(
       return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
     }
 
-    const { data: vet, error } = await supabase
-      .from("vets")
-      .select("*")
-      .eq("id", id)
-      .single();
+    const vet = await safeQuery<{ id: string; user_id: string; [key: string]: unknown }>(
+      supabase.from("vets").select("*").eq("id", id).single()
+    );
 
-    if (error || !vet) {
+    if (!vet) {
       return NextResponse.json({ error: "Vet not found" }, { status: 404 });
     }
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id, name, email, phone, avatar_url")
-      .eq("id", vet.user_id)
-      .single();
+    const profile = await safeQuery<{ id: string; name: string; email: string; phone: string; avatar_url: string }>(
+      supabase.from("profiles").select("id, name, email, phone, avatar_url").eq("id", vet.user_id).single()
+    );
 
-    const { data: services } = await supabase
-      .from("vet_services")
-      .select("*")
-      .eq("vet_id", id)
-      .eq("is_active", true);
+    const services = await safeQuery<{ id: string; service_type: string; title: string; description: string; price: number; duration_minutes: number; is_active: boolean }[]>(
+      supabase.from("vet_services").select("*").eq("vet_id", id).eq("is_active", true)
+    );
 
-    const { data: reviews } = await supabase
-      .from("reviews")
-      .select("*")
-      .eq("vet_id", id)
-      .order("created_at", { ascending: false })
-      .limit(20);
+    const reviews = await safeQuery<{ id: string; owner_id: string; rating: number; review_text: string; created_at: string }[]>(
+      supabase.from("reviews").select("*").eq("vet_id", id).order("created_at", { ascending: false }).limit(20)
+    );
 
-    const reviewOwnerIds = (reviews || []).map((r: Record<string, unknown>) => r.owner_id as string);
+    const reviewOwnerIds = (reviews || []).map((r) => r.owner_id).filter(Boolean);
     let profilesMap = new Map<string, { name: string }>();
     if (reviewOwnerIds.length > 0) {
-      const { data: reviewProfiles } = await supabase
-        .from("profiles")
-        .select("id, name")
-        .in("id", reviewOwnerIds);
-      profilesMap = new Map((reviewProfiles || []).map((p: Record<string, unknown>) => [p.id as string, p as { name: string }]));
+      const reviewProfiles = await safeQuery<{ id: string; name: string }[]>(
+        supabase.from("profiles").select("id, name").in("id", reviewOwnerIds)
+      );
+      profilesMap = new Map((reviewProfiles || []).map((p) => [p.id, p]));
     }
 
-    const enrichedReviews = (reviews || []).map((r: Record<string, unknown>) => ({
+    const enrichedReviews = (reviews || []).map((r) => ({
       ...r,
-      profiles: profilesMap.get(r.owner_id as string) || null,
+      profiles: profilesMap.get(r.owner_id) || null,
     }));
 
-    const { data: availability } = await supabase
-      .from("vet_availability")
-      .select("*")
-      .eq("vet_id", id)
-      .eq("is_available", true);
+    const availability = await safeQuery<{ id: string; day_of_week: number; start_time: string; end_time: string; is_available: boolean }[]>(
+      supabase.from("vet_availability").select("*").eq("vet_id", id).eq("is_available", true)
+    );
 
     return NextResponse.json({
       ...vet,

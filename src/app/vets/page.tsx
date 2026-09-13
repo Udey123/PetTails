@@ -41,17 +41,21 @@ export default function VetsBrowsePage() {
 
         let servicesMap: Record<string, VetService[]> = {};
         if (vetIds.length > 0) {
-          const { data: services } = await supabase
-            .from("vet_services")
-            .select("*")
-            .eq("is_active", true)
-            .in("vet_id", vetIds);
+          try {
+            const { data: services } = await supabase
+              .from("vet_services")
+              .select("*")
+              .eq("is_active", true)
+              .in("vet_id", vetIds);
 
-          if (services) {
-            for (const svc of services) {
-              if (!servicesMap[svc.vet_id]) servicesMap[svc.vet_id] = [];
-              servicesMap[svc.vet_id].push(svc);
+            if (services) {
+              for (const svc of services) {
+                if (!servicesMap[svc.vet_id]) servicesMap[svc.vet_id] = [];
+                servicesMap[svc.vet_id].push(svc);
+              }
             }
+          } catch {
+            // vet_services table may not exist yet
           }
         }
 
@@ -70,22 +74,27 @@ export default function VetsBrowsePage() {
 
     fetchVets();
 
-    const channel = supabase
-      .channel("vets-browse")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "vets" },
-        () => fetchVets()
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "vet_services" },
-        () => fetchVets()
-      )
-      .subscribe();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      channel = supabase
+        .channel("vets-browse")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "vets" },
+          () => fetchVets()
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "vet_services" },
+          () => fetchVets()
+        )
+        .subscribe();
+    } catch {
+      // Realtime may not be enabled on these tables yet
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [supabase]);
 
