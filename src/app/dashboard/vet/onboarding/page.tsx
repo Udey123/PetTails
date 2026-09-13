@@ -158,7 +158,7 @@ export default function VetOnboarding() {
         .single();
 
       if (vetError || !vet) {
-        // No vet record found — create one
+        // No vet record found — create one using only base columns (migration 001)
         const { data: newVet, error: createError } = await supabase
           .from("vets")
           .insert({
@@ -166,18 +166,27 @@ export default function VetOnboarding() {
             specialization: "General practice",
             consultation_price: 499,
             verified: false,
-            verification_status: "pending",
             online: false,
             accepting_bookings: false,
-            onboarding_completed: false,
           })
           .select()
           .single();
 
         if (createError || !newVet) {
+          console.error("Failed to create vet record:", createError);
           setError("Failed to create vet profile. Please try again or contact support.");
           setLoading(false);
           return;
+        }
+
+        // Try to set new columns (may not exist if migration 002 hasn't run)
+        try {
+          await supabase.from("vets").update({
+            verification_status: "pending",
+            onboarding_completed: false,
+          }).eq("id", newVet.id);
+        } catch {
+          // New columns don't exist yet — that's fine, onboarding will still work
         }
 
         setVetId(newVet.id);
@@ -306,7 +315,12 @@ export default function VetOnboarding() {
 
     if (updateError) {
       console.error("Failed to save vet data:", updateError);
-      setError(`Failed to save: ${updateError.message}`);
+      // If the error is about missing columns, show a helpful message
+      if (updateError.message?.includes("column") || updateError.code === "42703") {
+        setError("Some fields require a database update. Please run the migration in Supabase SQL Editor (supabase/migrations/002_vet_marketplace.sql), then try again.");
+      } else {
+        setError(`Failed to save: ${updateError.message}`);
+      }
       setSaving(false);
       return false;
     }
@@ -397,13 +411,72 @@ export default function VetOnboarding() {
     return (
       <div style={{ padding: "84px 0", textAlign: "center" }}>
         <div className="wrap" style={{ maxWidth: 420 }}>
-          <h2 style={{ fontSize: "1.4rem", marginBottom: 10 }}>Vet profile not found</h2>
-          <p style={{ color: "var(--ink-soft)", fontSize: "0.95rem", marginBottom: 20 }}>
-            We couldn&apos;t find or create your vet profile. Please try signing up again.
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              borderRadius: "50%",
+              background: "var(--paper-2)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "0 auto 20px",
+              fontSize: "1.6rem",
+              color: "var(--ink-soft)",
+            }}
+          >
+            🩺
+          </div>
+          <h2 style={{ fontSize: "1.4rem", marginBottom: 10 }}>Create your vet profile</h2>
+          <p style={{ color: "var(--ink-soft)", fontSize: "0.95rem", marginBottom: 24 }}>
+            Set up your professional profile to start receiving consultations from pet owners.
           </p>
-          <a href="/auth/signup?role=vet" className="btn-primary" style={{ textDecoration: "none", display: "inline-block" }}>
-            Sign up as a vet
-          </a>
+          <button
+            className="btn-primary"
+            style={{ padding: "14px 28px", fontSize: "1rem" }}
+            onClick={async () => {
+              setError(null);
+              setLoading(true);
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) {
+                router.push("/auth/login");
+                return;
+              }
+              const { data: newVet, error: createErr } = await supabase
+                .from("vets")
+                .insert({
+                  user_id: user.id,
+                  specialization: "General practice",
+                  consultation_price: 499,
+                  verified: false,
+                  online: false,
+                  accepting_bookings: false,
+                })
+                .select()
+                .single();
+              if (createErr || !newVet) {
+                console.error("Create failed:", createErr);
+                setError("Could not create profile. Please try again.");
+                setLoading(false);
+                return;
+              }
+              // Try setting new columns
+              try {
+                await supabase.from("vets").update({
+                  verification_status: "pending",
+                  onboarding_completed: false,
+                }).eq("id", newVet.id);
+              } catch { /* ignore */ }
+              setVetId(newVet.id);
+              setLoading(false);
+            }}
+          >
+            Create Profile
+          </button>
+          <p style={{ marginTop: 16, fontSize: "0.85rem", color: "var(--ink-soft)" }}>
+            Already have an account?{" "}
+            <a href="/auth/login" style={{ color: "var(--deep)", fontWeight: 600 }}>Log in</a>
+          </p>
         </div>
       </div>
     );
