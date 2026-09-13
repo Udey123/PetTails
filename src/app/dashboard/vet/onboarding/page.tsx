@@ -320,6 +320,11 @@ export default function VetOnboarding() {
 
     if (step === TOTAL_STEPS) {
       newColumnUpdate.onboarding_completed = true;
+      newColumnUpdate.verified = true;
+      newColumnUpdate.verification_status = "verified";
+      newColumnUpdate.verified_at = new Date().toISOString();
+      newColumnUpdate.accepting_bookings = true;
+      newColumnUpdate.online = true;
     }
 
     const { error: updateError } = await supabase.from("vets").update(newColumnUpdate).eq("id", vetId);
