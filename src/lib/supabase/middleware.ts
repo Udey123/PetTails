@@ -1,7 +1,17 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+function isSupabaseConfigured(): boolean {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  return !!(url && key && url !== 'your-supabase-url' && key !== 'your-supabase-anon-key' && url.startsWith('http'));
+}
+
 export async function updateSession(request: NextRequest) {
+  if (!isSupabaseConfigured()) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -45,7 +55,6 @@ export async function updateSession(request: NextRequest) {
   // Redirect logged-in users away from auth pages
   if (user && (pathname.startsWith('/auth/login') || pathname.startsWith('/auth/signup'))) {
     const url = request.nextUrl.clone();
-    // Check user role to redirect to correct dashboard
     const { data: profile } = await supabase
       .from('profiles')
       .select('role')
