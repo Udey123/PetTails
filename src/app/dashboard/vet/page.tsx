@@ -140,7 +140,10 @@ export default function VetDashboard() {
         return;
       }
 
-      if (!vetData.onboarding_completed) {
+      // onboarding_completed may not exist if migration 002 hasn't run
+      // If the column is missing, vetData.onboarding_completed is undefined (falsy)
+      // Only redirect if the column EXISTS and is explicitly false
+      if (vetData.onboarding_completed === false && "onboarding_completed" in vetData) {
         router.push("/dashboard/vet/onboarding");
         return;
       }
@@ -332,23 +335,29 @@ export default function VetDashboard() {
 
   const handleSaveProfile = async (fields: Partial<Vet>) => {
     if (!vet) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("vets")
       .update(fields)
       .eq("id", vet.id)
       .select()
       .single();
+    if (error) {
+      console.warn("Profile save partial failure:", error.message);
+    }
     if (data) setVet(data);
   };
 
   const handleSubmitVerification = async () => {
     if (!vet) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("vets")
       .update({ verification_status: "under_review" })
       .eq("id", vet.id)
       .select()
       .single();
+    if (error) {
+      console.warn("Verification submit failed:", error.message);
+    }
     if (data) setVet(data);
   };
 
