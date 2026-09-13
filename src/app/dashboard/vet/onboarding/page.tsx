@@ -150,10 +150,10 @@ export default function VetOnboarding() {
         return;
       }
 
-      // Try to find existing vet record
+      // Try to find existing vet record (no join — FK doesn't exist)
       const { data: vet, error: vetError } = await supabase
         .from("vets")
-        .select("*, profiles!vets_user_id_fkey(name, email, phone, avatar_url)")
+        .select("*")
         .eq("user_id", user.id)
         .single();
 
@@ -196,6 +196,13 @@ export default function VetOnboarding() {
 
       setVetId(vet.id);
 
+      // Fetch profile data separately
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("name, email, phone, avatar_url")
+        .eq("id", user.id)
+        .single();
+
       // Load services and availability only if vet.id exists
       const { data: existingServices } = await supabase
         .from("vet_services")
@@ -230,7 +237,7 @@ export default function VetOnboarding() {
         full_name: "",
         display_name: vet.display_name || "",
         professional_title: vet.professional_title || "",
-        phone: vet.profiles?.phone || "",
+        phone: profileData?.phone || "",
         city: vet.city || "",
         area: vet.area || "",
         clinic_name: vet.clinic_name || "",
