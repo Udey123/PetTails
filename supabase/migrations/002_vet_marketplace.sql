@@ -62,8 +62,26 @@ CREATE POLICY "Anyone can view active vet services"
   ON vet_services FOR SELECT
   USING (is_active = true);
 
-CREATE POLICY "Vets can manage own services"
-  ON vet_services FOR ALL
+CREATE POLICY "Vets can view own services"
+  ON vet_services FOR SELECT
+  USING (
+    vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Vets can insert own services"
+  ON vet_services FOR INSERT
+  WITH CHECK (
+    vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Vets can update own services"
+  ON vet_services FOR UPDATE
+  USING (
+    vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Vets can delete own services"
+  ON vet_services FOR DELETE
   USING (
     vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
   );
@@ -92,8 +110,26 @@ CREATE POLICY "Anyone can view vet availability"
   ON vet_availability FOR SELECT
   USING (true);
 
-CREATE POLICY "Vets can manage own availability"
-  ON vet_availability FOR ALL
+CREATE POLICY "Vets can view own availability"
+  ON vet_availability FOR SELECT
+  USING (
+    vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Vets can insert own availability"
+  ON vet_availability FOR INSERT
+  WITH CHECK (
+    vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Vets can update own availability"
+  ON vet_availability FOR UPDATE
+  USING (
+    vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Vets can delete own availability"
+  ON vet_availability FOR DELETE
   USING (
     vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
   );
@@ -118,8 +154,26 @@ CREATE POLICY "Anyone can view blocked slots"
   ON vet_blocked_slots FOR SELECT
   USING (true);
 
-CREATE POLICY "Vets can manage own blocked slots"
-  ON vet_blocked_slots FOR ALL
+CREATE POLICY "Vets can view own blocked slots"
+  ON vet_blocked_slots FOR SELECT
+  USING (
+    vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Vets can insert own blocked slots"
+  ON vet_blocked_slots FOR INSERT
+  WITH CHECK (
+    vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Vets can update own blocked slots"
+  ON vet_blocked_slots FOR UPDATE
+  USING (
+    vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
+  );
+
+CREATE POLICY "Vets can delete own blocked slots"
+  ON vet_blocked_slots FOR DELETE
   USING (
     vet_id IN (SELECT id FROM vets WHERE user_id = auth.uid())
   );

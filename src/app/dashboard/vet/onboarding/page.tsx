@@ -140,6 +140,7 @@ export default function VetOnboarding() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -149,19 +150,44 @@ export default function VetOnboarding() {
         return;
       }
 
-      const { data: vet } = await supabase
+      // Try to find existing vet record
+      const { data: vet, error: vetError } = await supabase
         .from("vets")
-        .select("*")
+        .select("*, profiles!vets_user_id_fkey(name, email, phone, avatar_url)")
         .eq("user_id", user.id)
         .single();
 
-      if (!vet) {
+      if (vetError || !vet) {
+        // No vet record found — create one
+        const { data: newVet, error: createError } = await supabase
+          .from("vets")
+          .insert({
+            user_id: user.id,
+            specialization: "General practice",
+            consultation_price: 499,
+            verified: false,
+            verification_status: "pending",
+            online: false,
+            accepting_bookings: false,
+            onboarding_completed: false,
+          })
+          .select()
+          .single();
+
+        if (createError || !newVet) {
+          setError("Failed to create vet profile. Please try again or contact support.");
+          setLoading(false);
+          return;
+        }
+
+        setVetId(newVet.id);
         setLoading(false);
         return;
       }
 
       setVetId(vet.id);
 
+      // Load services and availability only if vet.id exists
       const { data: existingServices } = await supabase
         .from("vet_services")
         .select("*")
@@ -244,9 +270,13 @@ export default function VetOnboarding() {
     return Object.keys(errs).length === 0;
   };
 
-  const saveVetData = async () => {
-    if (!vetId) return;
+  const saveVetData = async (): Promise<boolean> => {
+    if (!vetId) {
+      setError("No vet profile found. Please refresh and try again.");
+      return false;
+    }
     setSaving(true);
+    setError(null);
 
     const vetUpdate: Record<string, unknown> = {
       display_name: data.display_name || null,
@@ -272,13 +302,23 @@ export default function VetOnboarding() {
       vetUpdate.onboarding_completed = true;
     }
 
-    await supabase.from("vets").update(vetUpdate).eq("id", vetId);
+    const { error: updateError } = await supabase.from("vets").update(vetUpdate).eq("id", vetId);
+
+    if (updateError) {
+      console.error("Failed to save vet data:", updateError);
+      setError(`Failed to save: ${updateError.message}`);
+      setSaving(false);
+      return false;
+    }
 
     if (step === 4) {
-      await supabase.from("vet_services").delete().eq("vet_id", vetId);
+      const { error: delErr } = await supabase.from("vet_services").delete().eq("vet_id", vetId);
+      if (delErr) {
+        console.error("Failed to clear services:", delErr);
+      }
       const activeServices = data.services.filter((s) => s.is_active);
       if (activeServices.length > 0) {
-        await supabase.from("vet_services").insert(
+        const { error: insErr } = await supabase.from("vet_services").insert(
           activeServices.map((s) => ({
             vet_id: vetId,
             service_type: s.service_type,
@@ -288,13 +328,22 @@ export default function VetOnboarding() {
             is_active: s.is_active,
           }))
         );
+        if (insErr) {
+          console.error("Failed to save services:", insErr);
+          setError(`Failed to save services: ${insErr.message}`);
+          setSaving(false);
+          return false;
+        }
       }
     }
 
     if (step === 5) {
-      await supabase.from("vet_availability").delete().eq("vet_id", vetId);
+      const { error: delErr } = await supabase.from("vet_availability").delete().eq("vet_id", vetId);
+      if (delErr) {
+        console.error("Failed to clear availability:", delErr);
+      }
       if (data.availability.length > 0) {
-        await supabase.from("vet_availability").insert(
+        const { error: insErr } = await supabase.from("vet_availability").insert(
           data.availability.map((a) => ({
             vet_id: vetId,
             day_of_week: a.day_of_week,
@@ -303,15 +352,23 @@ export default function VetOnboarding() {
             is_available: a.is_available,
           }))
         );
+        if (insErr) {
+          console.error("Failed to save availability:", insErr);
+          setError(`Failed to save availability: ${insErr.message}`);
+          setSaving(false);
+          return false;
+        }
       }
     }
 
     setSaving(false);
+    return true;
   };
 
   const handleNext = async () => {
     if (!validateStep()) return;
-    await saveVetData();
+    const saved = await saveVetData();
+    if (!saved) return; // Don't advance if save failed
     if (step === TOTAL_STEPS) {
       router.push("/dashboard/vet");
     } else {
@@ -331,7 +388,23 @@ export default function VetOnboarding() {
   if (loading) {
     return (
       <div style={{ padding: "84px 0", textAlign: "center", color: "var(--ink-soft)" }}>
-        Loading...
+        Loading your profile...
+      </div>
+    );
+  }
+
+  if (!vetId) {
+    return (
+      <div style={{ padding: "84px 0", textAlign: "center" }}>
+        <div className="wrap" style={{ maxWidth: 420 }}>
+          <h2 style={{ fontSize: "1.4rem", marginBottom: 10 }}>Vet profile not found</h2>
+          <p style={{ color: "var(--ink-soft)", fontSize: "0.95rem", marginBottom: 20 }}>
+            We couldn&apos;t find or create your vet profile. Please try signing up again.
+          </p>
+          <a href="/auth/signup?role=vet" className="btn-primary" style={{ textDecoration: "none", display: "inline-block" }}>
+            Sign up as a vet
+          </a>
+        </div>
       </div>
     );
   }
@@ -401,6 +474,22 @@ export default function VetOnboarding() {
         </div>
 
         {/* Step content */}
+        {error && (
+          <div
+            style={{
+              padding: "14px 18px",
+              borderRadius: "var(--radius-s)",
+              background: "#C9727A22",
+              border: "1px solid var(--rose)",
+              color: "var(--rose)",
+              fontSize: "0.9rem",
+              marginBottom: 16,
+              fontWeight: 500,
+            }}
+          >
+            {error}
+          </div>
+        )}
         <div className="card" style={{ padding: 28 }}>
           {step === 1 && (
             <StepProfessional
