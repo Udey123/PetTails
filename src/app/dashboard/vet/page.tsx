@@ -115,6 +115,7 @@ export default function VetDashboard() {
   const [bookingFilter, setBookingFilter] = useState<BookingFilter>("all");
   const [editingService, setEditingService] = useState<VetService | null>(null);
   const [showServiceForm, setShowServiceForm] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const supabase = createClient();
   const router = useRouter();
@@ -206,7 +207,71 @@ export default function VetDashboard() {
       setLoading(false);
     };
     load();
-  }, [supabase, router]);
+
+    // Realtime subscriptions
+    if (!vet) return;
+
+    const channel = supabase
+      .channel("vet-dashboard")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "vet_services" },
+        async () => {
+          if (!vet) return;
+          const { data } = await supabase
+            .from("vet_services")
+            .select("*")
+            .eq("vet_id", vet.id)
+            .order("created_at", { ascending: false });
+          setServices(data || []);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "vet_availability" },
+        async () => {
+          if (!vet) return;
+          const { data } = await supabase
+            .from("vet_availability")
+            .select("*")
+            .eq("vet_id", vet.id)
+            .order("day_of_week", { ascending: true });
+          setAvailability(data || []);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookings" },
+        async () => {
+          if (!vet) return;
+          const { data } = await supabase
+            .from("bookings")
+            .select("*, pets(name, species)")
+            .eq("vet_id", vet.id)
+            .order("scheduled_at", { ascending: false });
+          if (data) {
+            const ownerIds = data.map((b: Record<string, unknown>) => b.owner_id as string).filter(Boolean);
+            let ownerMap = new Map<string, { name: string }>();
+            if (ownerIds.length > 0) {
+              const { data: owners } = await supabase
+                .from("profiles")
+                .select("id, name")
+                .in("id", ownerIds);
+              ownerMap = new Map((owners || []).map((p: Record<string, unknown>) => [p.id as string, p as { name: string }]));
+            }
+            setBookings(data.map((b: Record<string, unknown>) => ({
+              ...b,
+              profiles: ownerMap.get(b.owner_id as string) || null,
+            })));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, router, vet?.id]);
 
   const updateBookingStatus = async (bookingId: string, status: string) => {
     await supabase.from("bookings").update({ status }).eq("id", bookingId);
@@ -267,8 +332,9 @@ export default function VetDashboard() {
 
   const handleSaveService = async (svc: Partial<VetService>) => {
     if (!vet) return;
+    setSaveError(null);
     if (editingService) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("vet_services")
         .update({
           title: svc.title,
@@ -280,13 +346,18 @@ export default function VetDashboard() {
         .eq("id", editingService.id)
         .select()
         .single();
+      if (error) {
+        console.error("Failed to update service:", error);
+        setSaveError(`Failed to save: ${error.message}`);
+        return;
+      }
       if (data) {
         setServices((prev) =>
           prev.map((s) => (s.id === data.id ? data : s))
         );
       }
     } else {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("vet_services")
         .insert({
           vet_id: vet.id,
@@ -299,6 +370,11 @@ export default function VetDashboard() {
         })
         .select()
         .single();
+      if (error) {
+        console.error("Failed to add service:", error);
+        setSaveError(`Failed to save: ${error.message}`);
+        return;
+      }
       if (data) {
         setServices((prev) => [data, ...prev]);
       }
@@ -330,7 +406,8 @@ export default function VetDashboard() {
     end: string
   ) => {
     if (!vet) return;
-    const { data } = await supabase
+    setSaveError(null);
+    const { data, error } = await supabase
       .from("vet_availability")
       .upsert({
         vet_id: vet.id,
@@ -341,6 +418,11 @@ export default function VetDashboard() {
       })
       .select()
       .single();
+    if (error) {
+      console.error("Failed to save availability:", error);
+      setSaveError(`Failed to save availability: ${error.message}`);
+      return;
+    }
     if (data) {
       const { data: all } = await supabase
         .from("vet_availability")
@@ -931,6 +1013,23 @@ export default function VetDashboard() {
         {/* ─── Services ─── */}
         {activeTab === "services" && (
           <div>
+            {saveError && (
+              <div style={{
+                padding: "12px 16px",
+                marginBottom: 16,
+                borderRadius: "var(--radius-s)",
+                background: "#C9727A15",
+                border: "1px solid #C9727A",
+                color: "#C9727A",
+                fontSize: "0.88rem",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}>
+                <span>{saveError}</span>
+                <button onClick={() => setSaveError(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#C9727A", fontWeight: 600, fontSize: "0.88rem" }}>✕</button>
+              </div>
+            )}
             <div
               style={{
                 display: "flex",

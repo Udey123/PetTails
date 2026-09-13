@@ -69,6 +69,24 @@ export default function VetsBrowsePage() {
     };
 
     fetchVets();
+
+    const channel = supabase
+      .channel("vets-browse")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "vets" },
+        () => fetchVets()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "vet_services" },
+        () => fetchVets()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [supabase]);
 
   const filteredVets = useMemo(() => {
