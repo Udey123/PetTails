@@ -37,10 +37,12 @@ export default function JoinConsultation(props: Props) {
   const scheduledMs = scheduledDate.getTime();
   const tenMinBefore = scheduledMs - 10 * 60 * 1000;
   const twoHoursAfter = scheduledMs + 2 * 60 * 60 * 1000;
-  const isJoinable = (props.status === "confirmed" || props.status === "in_progress");
-  const isBefore = !isJoinable && now < tenMinBefore;
-  const isAfter = !isJoinable && now > twoHoursAfter;
   const isCompleted = props.status === "completed";
+  const isInWindow = now >= tenMinBefore && now <= twoHoursAfter;
+  const isActiveStatus = props.status === "confirmed" || props.status === "in_progress";
+  const isJoinable = isActiveStatus && isInWindow;
+  const isBefore = !isCompleted && now < tenMinBefore;
+  const isAfter = !isCompleted && now > twoHoursAfter && isActiveStatus;
 
   function handleJoin() {
     if (!props.googleMeetUrl) return;

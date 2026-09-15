@@ -57,14 +57,14 @@ export default async function ConsultationPage({ params }: Props) {
 
   const { data: vetData } = await supabase
     .from("vets")
-    .select("id, display_name, specialization, google_meet_url")
+    .select("id, display_name, specialization, google_meet_url, user_id")
     .eq("id", booking.vet_id)
     .single();
 
   const { data: vetProfile } = await supabase
     .from("profiles")
     .select("name")
-    .eq("id", booking.vet_id)
+    .eq("id", vetData?.user_id || "")
     .single();
 
   const vetName =
