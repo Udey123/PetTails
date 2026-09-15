@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS vets (
   onboarding_completed boolean NOT NULL DEFAULT false
 );
 
--- bookings
+-- bookings (create if not exists, add columns if it does)
 CREATE TABLE IF NOT EXISTS bookings (
   id uuid primary key default uuid_generate_v4(),
   reference text unique not null,
@@ -84,11 +84,19 @@ CREATE TABLE IF NOT EXISTS bookings (
   amount integer not null,
   payment_status text not null default 'pending' check (payment_status in ('pending', 'paid', 'refunded', 'failed')),
   payment_id text,
-  urgency text default 'normal' check (urgency in ('normal', 'urgent', 'emergency')),
+  urgency text default 'normal',
   symptoms text,
   notes text,
   created_at timestamptz not null default now()
 );
+
+-- Add missing columns if table existed from 001
+DO $$ BEGIN
+  ALTER TABLE bookings ADD COLUMN IF NOT EXISTS urgency text default 'normal';
+  ALTER TABLE bookings ADD COLUMN IF NOT EXISTS symptoms text;
+  ALTER TABLE bookings ADD COLUMN IF NOT EXISTS notes text;
+EXCEPTION WHEN duplicate_column THEN null;
+END $$;
 
 -- vet_services (from 002)
 CREATE TABLE IF NOT EXISTS vet_services (
@@ -129,8 +137,9 @@ CREATE TABLE IF NOT EXISTS reviews (
   created_at timestamptz not null default now()
 );
 
--- payments
-CREATE TABLE IF NOT EXISTS payments (
+-- payments (drop and recreate to match new schema)
+DROP TABLE IF EXISTS payments;
+CREATE TABLE payments (
   id uuid primary key default uuid_generate_v4(),
   booking_id uuid not null unique references bookings(id),
   owner_id uuid not null references profiles(id),

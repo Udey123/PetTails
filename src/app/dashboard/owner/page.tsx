@@ -630,16 +630,16 @@ export default function OwnerDashboard() {
                               SERVICE_LABELS[b.service_type] || b.service_type
                             )}
                           </div>
-                          {b.concern && (
-                            <div
-                              style={{
-                                color: "var(--ink-soft)",
-                                fontSize: "0.85rem",
-                                marginTop: 4,
-                                fontStyle: "italic",
-                              }}
-                            >
-                              &ldquo;{b.concern}&rdquo;
+{b.concern && (
+<div
+  style={{
+    color: "var(--ink-soft)",
+    fontSize: "0.85rem",
+    marginTop: 4,
+    fontStyle: "italic",
+  }}
+>
+  &ldquo;{b.concern}&rdquo;
                             </div>
                           )}
                           <div
@@ -691,6 +691,46 @@ export default function OwnerDashboard() {
                           </div>
 
                           <div style={{ display: "flex", gap: 6 }}>
+                            {b.service_type === "video_consult" && b.status === "confirmed" && (() => {
+                              const scheduled = new Date(b.scheduled_at).getTime();
+                              const now = Date.now();
+                              const joinWindow = now >= scheduled - 10 * 60 * 1000 && now <= scheduled + 2 * 60 * 60 * 1000;
+                              if (joinWindow) {
+                                return (
+                                  <a
+                                    href={`/consultation/${b.id}`}
+                                    style={{
+                                      padding: "6px 14px",
+                                      borderRadius: "var(--radius-s)",
+                                      background: "var(--deep)",
+                                      color: "var(--white)",
+                                      fontWeight: 600,
+                                      fontSize: "0.84rem",
+                                      textDecoration: "none",
+                                    }}
+                                  >
+                                    📹 Join Now →
+                                  </a>
+                                );
+                              }
+                              return null;
+                            })()}
+                            {b.service_type === "video_consult" && b.status === "in_progress" && (
+                              <a
+                                href={`/consultation/${b.id}`}
+                                style={{
+                                  padding: "6px 14px",
+                                  borderRadius: "var(--radius-s)",
+                                  background: "var(--deep)",
+                                  color: "var(--white)",
+                                  fontWeight: 600,
+                                  fontSize: "0.84rem",
+                                  textDecoration: "none",
+                                }}
+                              >
+                                📹 Join Now →
+                              </a>
+                            )}
                             {canCancel && (
                               <button
                                 className="btn-ghost"
@@ -975,8 +1015,8 @@ export default function OwnerDashboard() {
                               marginTop: 2,
                             }}
                           >
-                            {SERVICE_LABELS[b.service_type] || b.service_type} · Ref:{" "}
-                            {b.booking_reference}
+{SERVICE_LABELS[b.service_type] || b.service_type} · Ref:{" "}
+{b.booking_reference}
                           </div>
                           <div
                             style={{

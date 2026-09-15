@@ -55,6 +55,7 @@ export interface Vet {
   rejection_reason: string | null;
   online: boolean;
   accepting_bookings: boolean;
+  google_meet_url: string | null;
   is_active: boolean;
   onboarding_completed: boolean;
   latitude: number | null;
@@ -98,24 +99,20 @@ export type UrgencyLevel = 'routine' | 'soon' | 'urgent' | 'emergency';
 
 export interface Booking {
   id: string;
+  booking_reference: string;
   owner_id: string;
   vet_id: string;
   pet_id: string;
-  service_id: string | null;
   service_type: ServiceType;
-  booking_type: string;
   urgency: UrgencyLevel;
   scheduled_at: string;
-  duration_minutes: number;
   status: BookingStatus;
   price: number;
   payment_status: PaymentStatus;
-  booking_reference: string;
   concern: string | null;
   symptoms: string | null;
   notes: string | null;
   created_at: string;
-  updated_at: string;
   pets?: Pet;
   vets?: Vet;
   profiles?: Profile;

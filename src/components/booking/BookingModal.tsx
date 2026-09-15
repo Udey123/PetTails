@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 import {
   formatPrice,
   SERVICE_LABELS,
-  SERVICE_ICONS,
   URGENCY_LABELS,
   URGENCY_DESCRIPTIONS,
   URGENCY_COLORS,
@@ -25,7 +24,6 @@ type Step =
   | "problem"
   | "datetime"
   | "summary"
-  | "payment"
   | "confirmation";
 
 const STEPS: { key: Step; label: string }[] = [
@@ -35,7 +33,6 @@ const STEPS: { key: Step; label: string }[] = [
   { key: "problem", label: "Details" },
   { key: "datetime", label: "Date & Time" },
   { key: "summary", label: "Summary" },
-  { key: "payment", label: "Payment" },
   { key: "confirmation", label: "Done" },
 ];
 
@@ -76,6 +73,7 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
   const [step, setStep] = useState<Step>("pet");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [bookingCreated, setBookingCreated] = useState(false);
 
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPetId, setSelectedPetId] = useState("");
@@ -109,6 +107,9 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
   );
   const [urgency, setUrgency] = useState<string>("routine");
   const [symptoms, setSymptoms] = useState("");
+  const [urgencyPrice, setUrgencyPrice] = useState<number | null>(null);
+  const [urgencyPriceLoading, setUrgencyPriceLoading] = useState(false);
+  const [urgencyPriceError, setUrgencyPriceError] = useState<string | null>(null);
 
   const dateOptions = useMemo(() => getNextDays(7), []);
   const [selectedDate, setSelectedDate] = useState(dateOptions[0]?.date || "");
@@ -118,7 +119,16 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
 
   const [bookingRef, setBookingRef] = useState("");
   const [bookingId, setBookingId] = useState("");
-  const [paymentProcessing, setPaymentProcessing] = useState(false);
+  const [confirmedBooking, setConfirmedBooking] = useState<{
+    price: number;
+    serviceTitle: string;
+    petName: string;
+    date: string;
+    time: string;
+    urgency: string;
+    vetName: string;
+    bookingRef: string;
+  } | null>(null);
 
   const currentStepIndex = STEPS.findIndex((s) => s.key === step);
   const selectedPet = pets.find((p) => p.id === selectedPetId);
@@ -139,6 +149,40 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
     };
     loadPets();
   }, [supabase]);
+
+  useEffect(() => {
+    if (!selectedService || !urgency) return;
+    let cancelled = false;
+    async function fetchPrice() {
+      setUrgencyPriceLoading(true);
+      setUrgencyPriceError(null);
+      try {
+        const res = await fetch(
+          `/api/pricing?vet_id=${vet.id}&service_type=${selectedService!.service_type}&urgency=${urgency}`
+        );
+        if (!res.ok) {
+          if (!cancelled) {
+            setUrgencyPrice(null);
+            setUrgencyPriceError("Consultation price unavailable for this urgency");
+          }
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) {
+          setUrgencyPrice(data.price);
+        }
+      } catch {
+        if (!cancelled) {
+          setUrgencyPrice(null);
+          setUrgencyPriceError("Failed to load pricing");
+        }
+      } finally {
+        if (!cancelled) setUrgencyPriceLoading(false);
+      }
+    }
+    fetchPrice();
+    return () => { cancelled = true; };
+  }, [vet.id, selectedService, urgency]);
 
   useEffect(() => {
     if (step !== "datetime" || !selectedDate) return;
@@ -249,9 +293,11 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
     }
   }
 
-  async function handleCreateBooking() {
+  async function handleConfirmAndPay() {
+    if (loading || bookingCreated) return;
     setLoading(true);
     setError(null);
+
     try {
       const res = await fetch("/api/bookings", {
         method: "POST",
@@ -263,70 +309,59 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
           service_id: selectedService?.id || null,
           scheduled_at: selectedSlot?.start,
           urgency,
-          concern: symptoms || null,
           symptoms: symptoms || null,
-          duration_minutes: selectedService?.duration_minutes || 30,
+          concern: symptoms || null,
         }),
       });
 
       const data = await res.json();
+
       if (!res.ok) {
-        setError(data.error || "Booking failed. Please try again.");
+        if (res.status === 409 && data.error?.includes("time slot")) {
+          setError("This time slot is no longer available. Please choose another time.");
+          setStep("datetime");
+          setLoading(false);
+          return;
+        }
+        setError(data.error || "Unable to confirm your consultation right now. Please try again.");
         setLoading(false);
         return;
       }
 
+      setBookingCreated(true);
       setBookingRef(data.booking_reference);
       setBookingId(data.id);
 
-      const price = selectedService?.price || 0;
-      if (price > 0) {
-        setStep("payment");
-        setLoading(false);
-        return;
-      }
+      const slotDate = selectedSlot
+        ? new Date(selectedSlot.start).toLocaleDateString("en-IN", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          })
+        : "";
+      const slotTime = selectedSlot
+        ? new Date(selectedSlot.start).toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "";
 
-      setStep("confirmation");
-    } catch {
-      setError("Something went wrong. Please try again.");
-      setLoading(false);
-    }
-  }
-
-  async function handlePayment() {
-    setPaymentProcessing(true);
-    setError(null);
-    try {
-      const payRes = await fetch("/api/payments/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          booking_id: bookingId,
-          amount: selectedService?.price || vet.consultation_price,
-        }),
+      setConfirmedBooking({
+        price: data.price,
+        serviceTitle: selectedService?.title || SERVICE_LABELS[selectedService?.service_type || ""] || "Consultation",
+        petName: selectedPet?.name || "your pet",
+        date: slotDate,
+        time: slotTime,
+        urgency: URGENCY_LABELS[urgency as keyof typeof URGENCY_LABELS] || urgency,
+        vetName,
+        bookingRef: data.booking_reference,
       });
 
-      const payData = await payRes.json();
-
-      if (payRes.ok && payData.razorpay_order_id) {
-        await fetch("/api/payments/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            booking_id: bookingId,
-            razorpay_order_id: payData.razorpay_order_id,
-            razorpay_payment_id: "demo_" + Date.now(),
-            razorpay_signature: "demo_signature",
-          }),
-        });
-      }
-
       setStep("confirmation");
     } catch {
-      setError("Payment failed. Your booking is saved — you can retry payment from your dashboard.");
-      setStep("confirmation");
+      setError("Unable to confirm your consultation right now. Please try again.");
     } finally {
-      setPaymentProcessing(false);
+      setLoading(false);
     }
   }
 
@@ -346,290 +381,260 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
     });
   }
 
+  const handleClose = () => {
+    if (bookingCreated) {
+      onClose();
+    } else {
+      onClose();
+    }
+  };
+
   return (
     <div
       className="modal-backdrop"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={handleClose}
     >
-      <div className="modal" style={{ padding: 0, overflow: "hidden" }}>
-        <button
-          className="modal-close"
-          onClick={onClose}
-          aria-label="Close"
-          style={{ zIndex: 10 }}
+      <div
+        className="modal-content"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: 520,
+          width: "95vw",
+          maxHeight: "90vh",
+          borderRadius: "var(--radius-l)",
+          background: "var(--white)",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "18px 28px 14px",
+            borderBottom: "1px solid var(--line)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
         >
-          ×
-        </button>
-
-        {/* Progress bar */}
-        <div style={{ padding: "20px 28px 0" }}>
-          <div
-            style={{
-              display: "flex",
-              gap: 3,
-              marginBottom: 6,
-            }}
-          >
-            {STEPS.map((s, i) => (
-              <div
-                key={s.key}
-                style={{
-                  flex: 1,
-                  height: 4,
-                  borderRadius: 2,
-                  background:
-                    i <= currentStepIndex ? "var(--deep)" : "var(--line)",
-                  transition: "background 0.3s",
-                }}
-              />
-            ))}
-          </div>
-          <div
-            style={{
-              fontSize: "0.75rem",
-              color: "var(--ink-soft)",
-              fontWeight: 500,
-            }}
-          >
-            Step {currentStepIndex + 1} of {STEPS.length}
-          </div>
-        </div>
-
-        {/* Step content */}
-        <div style={{ padding: "16px 28px 20px", minHeight: 340 }}>
-          {/* ── Step 1: Select Pet ── */}
-          {step === "pet" && (
-            <div>
-              <h3 style={{ fontSize: "1.2rem", marginBottom: 4 }}>
-                Who&apos;s the patient?
-              </h3>
+          <div>
+            <h2
+              style={{
+                fontSize: "1.08rem",
+                fontWeight: 700,
+                color: "var(--ink)",
+                margin: 0,
+              }}
+            >
+              {step === "confirmation" ? "Booking Confirmed" : "Book a Consultation"}
+            </h2>
+            {step !== "confirmation" && (
               <p
                 style={{
+                  fontSize: "0.8rem",
                   color: "var(--ink-soft)",
-                  fontSize: "0.88rem",
-                  marginBottom: 18,
+                  margin: "4px 0 0",
                 }}
               >
-                Select the pet you&apos;d like to book for.
+                with {vetName}
               </p>
+            )}
+          </div>
+          <button
+            onClick={handleClose}
+            style={{
+              background: "none",
+              border: "none",
+              fontSize: "1.3rem",
+              cursor: "pointer",
+              color: "var(--ink-soft)",
+              padding: 4,
+            }}
+          >
+            ✕
+          </button>
+        </div>
 
-              {pets.length === 0 && !showAddPet ? (
-                <div>
-                  <div
+        {/* Progress bar */}
+        {step !== "confirmation" && (
+          <div
+            style={{
+              padding: "12px 28px 0",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                gap: 4,
+                height: 3,
+                borderRadius: 2,
+                overflow: "hidden",
+              }}
+            >
+              {STEPS.slice(0, -1).map((s, i) => (
+                <div
+                  key={s.key}
+                  style={{
+                    flex: 1,
+                    background:
+                      i <= currentStepIndex
+                        ? "var(--amber)"
+                        : "var(--line)",
+                    borderRadius: 2,
+                    transition: "background 0.3s",
+                  }}
+                />
+              ))}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                marginTop: 6,
+                fontSize: "0.72rem",
+                color: "var(--ink-soft)",
+              }}
+            >
+              <span>Step {currentStepIndex + 1} of {STEPS.length - 1}</span>
+              <span>{STEPS[currentStepIndex]?.label}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Body */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "18px 28px 20px",
+          }}
+        >
+          {/* ── Step 1: Pet ── */}
+          {step === "pet" && (
+            <div>
+              <h3 style={{ fontSize: "1rem", marginBottom: 12, fontWeight: 600 }}>
+                Who is this consultation for?
+              </h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {pets.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedPetId(p.id)}
                     style={{
-                      textAlign: "center",
-                      padding: "28px 16px",
-                      border: "1px dashed var(--line)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      border: `2px solid ${selectedPetId === p.id ? "var(--amber)" : "var(--line)"}`,
                       borderRadius: "var(--radius-m)",
-                      marginBottom: 14,
+                      background: selectedPetId === p.id ? "#E4A13B11" : "var(--white)",
+                      cursor: "pointer",
+                      textAlign: "left",
                     }}
                   >
-                    <div style={{ fontSize: "1.8rem", marginBottom: 10 }}>🐾</div>
-                    <p
-                      style={{
-                        color: "var(--ink-soft)",
-                        fontSize: "0.9rem",
-                        marginBottom: 14,
-                      }}
-                    >
-                      You haven&apos;t added any pets yet.
-                    </p>
-                    <button
-                      className="btn-amber"
-                      onClick={() => setShowAddPet(true)}
-                      style={{ fontSize: "0.88rem" }}
-                    >
-                      Add your first pet
-                    </button>
-                  </div>
-                </div>
+                    <span style={{ fontSize: "1.3rem" }}>
+                      {p.species === "Dog" ? "🐕" : p.species === "Cat" ? "🐱" : "🐾"}
+                    </span>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: "0.92rem" }}>{p.name}</div>
+                      <div style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }}>
+                        {p.species}{p.breed ? ` · ${p.breed}` : ""}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {!showAddPet ? (
+                <button
+                  onClick={() => setShowAddPet(true)}
+                  style={{
+                    marginTop: 10,
+                    padding: "10px 14px",
+                    border: "1px dashed var(--line)",
+                    borderRadius: "var(--radius-m)",
+                    background: "none",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    color: "var(--ink-soft)",
+                    width: "100%",
+                  }}
+                >
+                  + Add a new pet
+                </button>
               ) : (
                 <div
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 10,
-                    marginBottom: 14,
-                  }}
-                >
-                  {pets.map((pet) => (
-                    <button
-                      key={pet.id}
-                      type="button"
-                      onClick={() => setSelectedPetId(pet.id)}
-                      style={{
-                        border: `2px solid ${
-                          selectedPetId === pet.id ? "var(--deep)" : "var(--line)"
-                        }`,
-                        borderRadius: "var(--radius-m)",
-                        padding: "14px 12px",
-                        background:
-                          selectedPetId === pet.id
-                            ? "var(--deep)"
-                            : "var(--white)",
-                        color:
-                          selectedPetId === pet.id ? "var(--white)" : "var(--ink)",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        transition: "all 0.15s",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: "1.3rem",
-                          marginBottom: 6,
-                        }}
-                      >
-                        {pet.species === "Dog"
-                          ? "🐕"
-                          : pet.species === "Cat"
-                          ? "🐈"
-                          : pet.species === "Bird"
-                          ? "🐦"
-                          : "🐾"}
-                      </div>
-                      <div style={{ fontWeight: 700, fontSize: "0.92rem" }}>
-                        {pet.name}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: "0.78rem",
-                          opacity: 0.8,
-                          marginTop: 2,
-                        }}
-                      >
-                        {pet.species}
-                        {pet.breed ? ` · ${pet.breed}` : ""}
-                      </div>
-                    </button>
-                  ))}
-
-                  {!showAddPet && (
-                    <button
-                      type="button"
-                      onClick={() => setShowAddPet(true)}
-                      style={{
-                        border: "2px dashed var(--line)",
-                        borderRadius: "var(--radius-m)",
-                        padding: "14px 12px",
-                        background: "transparent",
-                        color: "var(--ink-soft)",
-                        cursor: "pointer",
-                        textAlign: "center",
-                        fontSize: "0.85rem",
-                        fontWeight: 500,
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 6,
-                        minHeight: 100,
-                      }}
-                    >
-                      <span style={{ fontSize: "1.4rem" }}>+</span>
-                      Add pet
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {showAddPet && (
-                <div
-                  style={{
+                    marginTop: 10,
+                    padding: 14,
                     border: "1px solid var(--line)",
                     borderRadius: "var(--radius-m)",
-                    padding: 16,
-                    marginTop: 6,
                   }}
                 >
-                  <div
+                  <input
+                    placeholder="Pet name *"
+                    value={newPetName}
+                    onChange={(e) => setNewPetName(e.target.value)}
                     style={{
-                      fontWeight: 600,
+                      width: "100%",
+                      padding: "10px 12px",
+                      border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-s)",
+                      marginBottom: 8,
                       fontSize: "0.88rem",
-                      marginBottom: 12,
+                    }}
+                  />
+                  <select
+                    value={newPetSpecies}
+                    onChange={(e) => setNewPetSpecies(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-s)",
+                      marginBottom: 8,
+                      fontSize: "0.88rem",
+                      background: "var(--white)",
                     }}
                   >
-                    Add a new pet
-                  </div>
-                  <div style={{ marginBottom: 10 }}>
-                    <input
-                      type="text"
-                      placeholder="Pet name"
-                      value={newPetName}
-                      onChange={(e) => setNewPetName(e.target.value)}
-                      style={{
-                        width: "100%",
-                        border: "1px solid var(--line)",
-                        borderRadius: "var(--radius-s)",
-                        padding: "9px 10px",
-                        fontSize: "0.88rem",
-                        background: "var(--white)",
-                      }}
-                    />
-                  </div>
-                  <div style={{ marginBottom: 10 }}>
-                    <select
-                      value={newPetSpecies}
-                      onChange={(e) => setNewPetSpecies(e.target.value)}
-                      style={{
-                        width: "100%",
-                        border: "1px solid var(--line)",
-                        borderRadius: "var(--radius-s)",
-                        padding: "9px 10px",
-                        fontSize: "0.88rem",
-                        background: "var(--white)",
-                      }}
-                    >
-                      <option value="">Select species</option>
-                      {SPECIES_OPTIONS.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div style={{ marginBottom: 12 }}>
-                    <input
-                      type="text"
-                      placeholder="Breed (optional)"
-                      value={newPetBreed}
-                      onChange={(e) => setNewPetBreed(e.target.value)}
-                      style={{
-                        width: "100%",
-                        border: "1px solid var(--line)",
-                        borderRadius: "var(--radius-s)",
-                        padding: "9px 10px",
-                        fontSize: "0.88rem",
-                        background: "var(--white)",
-                      }}
-                    />
-                  </div>
+                    <option value="">Species *</option>
+                    {SPECIES_OPTIONS.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder="Breed (optional)"
+                    value={newPetBreed}
+                    onChange={(e) => setNewPetBreed(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      border: "1px solid var(--line)",
+                      borderRadius: "var(--radius-s)",
+                      marginBottom: 10,
+                      fontSize: "0.88rem",
+                    }}
+                  />
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
-                      className="btn-amber"
                       onClick={handleAddPet}
                       disabled={addingPet || !newPetName.trim() || !newPetSpecies.trim()}
-                      style={{ flex: 1, fontSize: "0.85rem", padding: "10px 12px" }}
+                      className="btn-amber"
+                      style={{ flex: 1, fontSize: "0.85rem" }}
                     >
-                      {addingPet ? "Adding..." : "Add pet"}
+                      {addingPet ? "Adding..." : "Add Pet"}
                     </button>
                     <button
-                      type="button"
-                      onClick={() => {
-                        setShowAddPet(false);
-                        setNewPetName("");
-                        setNewPetSpecies("");
-                        setNewPetBreed("");
-                      }}
+                      onClick={() => { setShowAddPet(false); setError(null); }}
                       style={{
+                        flex: "0 0 auto",
                         border: "1px solid var(--line)",
                         borderRadius: "var(--radius-s)",
-                        padding: "10px 14px",
+                        padding: "8px 14px",
                         background: "var(--white)",
-                        color: "var(--ink-soft)",
-                        cursor: "pointer",
                         fontSize: "0.85rem",
-                        fontWeight: 500,
+                        cursor: "pointer",
                       }}
                     >
                       Cancel
@@ -640,100 +645,41 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
             </div>
           )}
 
-          {/* ── Step 2: Select Service ── */}
+          {/* ── Step 2: Service ── */}
           {step === "service" && (
             <div>
-              <h3 style={{ fontSize: "1.2rem", marginBottom: 4 }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: 12, fontWeight: 600 }}>
                 Choose a service
               </h3>
-              <p
-                style={{
-                  color: "var(--ink-soft)",
-                  fontSize: "0.88rem",
-                  marginBottom: 18,
-                }}
-              >
-                Available services from {vetName}.
-              </p>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {services.map((svc) => (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {services.map((s) => (
                   <button
-                    key={svc.id}
-                    type="button"
-                    onClick={() => setSelectedService(svc)}
+                    key={s.id}
+                    onClick={() => setSelectedService(s)}
                     style={{
-                      border: `2px solid ${
-                        selectedService?.id === svc.id
-                          ? "var(--deep)"
-                          : "var(--line)"
-                      }`,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "12px 14px",
+                      border: `2px solid ${selectedService?.id === s.id ? "var(--amber)" : "var(--line)"}`,
                       borderRadius: "var(--radius-m)",
-                      padding: "16px 18px",
-                      background:
-                        selectedService?.id === svc.id
-                          ? "#12383208"
-                          : "var(--white)",
+                      background: selectedService?.id === s.id ? "#E4A13B11" : "var(--white)",
                       cursor: "pointer",
                       textAlign: "left",
-                      display: "flex",
-                      gap: 14,
-                      alignItems: "flex-start",
-                      transition: "all 0.15s",
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: "1.6rem",
-                        lineHeight: 1,
-                        marginTop: 2,
-                      }}
-                    >
-                      {SERVICE_ICONS[svc.service_type] || "🩺"}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          marginBottom: 4,
-                        }}
-                      >
-                        <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>
-                          {svc.title || SERVICE_LABELS[svc.service_type] || svc.service_type}
-                        </span>
-                        <span
-                          style={{
-                            fontWeight: 700,
-                            fontSize: "0.92rem",
-                            color: "var(--deep)",
-                          }}
-                        >
-                          {formatPrice(svc.price)}
-                        </span>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: "0.92rem" }}>
+                        {s.title || SERVICE_LABELS[s.service_type]}
                       </div>
-                      {svc.description && (
-                        <p
-                          style={{
-                            color: "var(--ink-soft)",
-                            fontSize: "0.82rem",
-                            margin: 0,
-                            lineHeight: 1.4,
-                          }}
-                        >
-                          {svc.description}
-                        </p>
+                      {s.description && (
+                        <div style={{ fontSize: "0.8rem", color: "var(--ink-soft)", marginTop: 2 }}>
+                          {s.description}
+                        </div>
                       )}
-                      <div
-                        style={{
-                          fontSize: "0.76rem",
-                          color: "var(--ink-soft)",
-                          marginTop: 6,
-                        }}
-                      >
-                        {svc.duration_minutes} min
-                      </div>
+                    </div>
+                    <div style={{ fontWeight: 700, color: "var(--deep)", fontSize: "0.95rem" }}>
+                      {formatPrice(s.price)}
                     </div>
                   </button>
                 ))}
@@ -741,115 +687,143 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
             </div>
           )}
 
-          {/* ── Step 3: Select Urgency ── */}
+          {/* ── Step 3: Urgency ── */}
           {step === "urgency" && (
             <div>
-              <h3 style={{ fontSize: "1.2rem", marginBottom: 4 }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: 12, fontWeight: 600 }}>
                 How urgent is this?
               </h3>
-              <p
-                style={{
-                  color: "var(--ink-soft)",
-                  fontSize: "0.88rem",
-                  marginBottom: 18,
-                }}
-              >
-                This helps the vet prepare for your consultation.
-              </p>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 10,
-                  marginBottom: 14,
-                }}
-              >
-                {URGENCY_KEYS.map((key) => {
-                  const colors = URGENCY_COLORS[key];
-                  const isSelected = urgency === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setUrgency(key)}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {URGENCY_KEYS.map((u) => (
+                  <button
+                    key={u}
+                    onClick={() => setUrgency(u)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 14px",
+                      border: `2px solid ${urgency === u ? URGENCY_COLORS[u].border : "var(--line)"}`,
+                      borderRadius: "var(--radius-m)",
+                      background: urgency === u ? `${URGENCY_COLORS[u].bg}` : "var(--white)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <div
                       style={{
-                        border: `2px solid ${isSelected ? colors.border : "var(--line)"}`,
-                        borderRadius: "var(--radius-m)",
-                        padding: "16px 14px",
-                        background: isSelected ? colors.bg : "var(--white)",
-                        color: isSelected ? colors.text : "var(--ink)",
-                        cursor: "pointer",
-                        textAlign: "left",
-                        transition: "all 0.15s",
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        background: URGENCY_COLORS[u].bg,
+                        flexShrink: 0,
                       }}
-                    >
-                      <div style={{ fontWeight: 700, fontSize: "0.92rem", marginBottom: 4 }}>
-                        {URGENCY_LABELS[key]}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: "0.92rem" }}>
+                        {URGENCY_LABELS[u]}
                       </div>
-                      <div style={{ fontSize: "0.78rem", opacity: 0.85 }}>
-                        {URGENCY_DESCRIPTIONS[key]}
+                      <div style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }}>
+                        {URGENCY_DESCRIPTIONS[u]}
                       </div>
-                    </button>
-                  );
-                })}
+                    </div>
+                  </button>
+                ))}
               </div>
 
+              {/* Price panel */}
               {urgency === "emergency" && (
                 <div
                   style={{
-                    background: "#F7ECEA",
-                    border: "1px solid var(--rose)",
+                    marginTop: 12,
+                    padding: "10px 14px",
                     borderRadius: "var(--radius-s)",
-                    padding: "14px 16px",
-                    fontSize: "0.84rem",
+                    background: "#C9727A11",
+                    border: "1px solid #C9727A33",
+                    fontSize: "0.82rem",
+                    color: "var(--rose)",
                     lineHeight: 1.5,
-                    color: "#6B2C32",
                   }}
                 >
-                  <strong>Safety notice:</strong> For serious emergencies
-                  (unconsciousness, heavy bleeding, seizures, difficulty
-                  breathing), please call your nearest 24-hr emergency clinic
-                  directly. This service is not a substitute for immediate
-                  emergency care.
+                  This may be a veterinary emergency. If your pet is in immediate danger, seek immediate emergency veterinary care rather than waiting for an online consultation.
                 </div>
               )}
+
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: "16px 18px",
+                  borderRadius: "var(--radius-m)",
+                  border: "1px solid var(--line)",
+                  background: "var(--paper)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "0.82rem",
+                    color: "var(--ink-soft)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    marginBottom: 6,
+                  }}
+                >
+                  Consultation fee
+                </div>
+                {urgencyPriceLoading ? (
+                  <div style={{ fontSize: "0.9rem", color: "var(--ink-soft)" }}>
+                    Loading price...
+                  </div>
+                ) : urgencyPriceError ? (
+                  <div style={{ fontSize: "0.9rem", color: "var(--rose)" }}>
+                    {urgencyPriceError}
+                  </div>
+                ) : urgencyPrice !== null ? (
+                  <>
+                    <div
+                      style={{
+                        fontSize: "1.5rem",
+                        fontWeight: 700,
+                        color: "var(--deep)",
+                        fontFamily: "var(--font-fraunces), Fraunces, serif",
+                      }}
+                    >
+                      {formatPrice(urgencyPrice)}
+                    </div>
+                    <div style={{ fontSize: "0.82rem", color: "var(--ink-soft)", marginTop: 2 }}>
+                      One-time consultation
+                    </div>
+                    <div style={{ fontSize: "0.82rem", color: "var(--ink-soft)", marginTop: 4 }}>
+                      Urgency: {URGENCY_LABELS[urgency as keyof typeof URGENCY_LABELS]}
+                    </div>
+                  </>
+                ) : null}
+              </div>
             </div>
           )}
 
-          {/* ── Step 4: Describe Problem ── */}
+          {/* ── Step 4: Problem ── */}
           {step === "problem" && (
             <div>
-              <h3 style={{ fontSize: "1.2rem", marginBottom: 4 }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: 12, fontWeight: 600 }}>
                 Describe the concern
               </h3>
-              <p
-                style={{
-                  color: "var(--ink-soft)",
-                  fontSize: "0.88rem",
-                  marginBottom: 18,
-                }}
-              >
-                Share symptoms or details so the vet can prepare. This is optional
-                but recommended.
+              <p style={{ fontSize: "0.85rem", color: "var(--ink-soft)", marginBottom: 10 }}>
+                Optional — helps the vet prepare.
               </p>
-
               <textarea
                 value={symptoms}
                 onChange={(e) => setSymptoms(e.target.value)}
-                placeholder="e.g. My dog has been limping on the left front leg for 2 days, with slight swelling near the paw..."
+                placeholder="e.g., Not eating since morning, limping on left front leg..."
+                rows={4}
                 maxLength={1000}
-                rows={6}
                 style={{
                   width: "100%",
+                  padding: "12px",
                   border: "1px solid var(--line)",
-                  borderRadius: "var(--radius-s)",
-                  padding: "12px 14px",
+                  borderRadius: "var(--radius-m)",
                   fontSize: "0.9rem",
-                  fontFamily: "inherit",
-                  lineHeight: 1.55,
                   resize: "vertical",
-                  background: "var(--white)",
+                  fontFamily: "inherit",
                 }}
               />
               <div
@@ -865,427 +839,268 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
             </div>
           )}
 
-          {/* ── Step 5: Select Date & Time ── */}
+          {/* ── Step 5: DateTime ── */}
           {step === "datetime" && (
             <div>
-              <h3 style={{ fontSize: "1.2rem", marginBottom: 4 }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: 12, fontWeight: 600 }}>
                 Pick a date & time
               </h3>
-              <p
-                style={{
-                  color: "var(--ink-soft)",
-                  fontSize: "0.88rem",
-                  marginBottom: 16,
-                }}
-              >
-                Available slots for {vetName}.
-              </p>
-
-              {/* Date buttons */}
               <div
                 style={{
                   display: "flex",
                   gap: 6,
                   overflowX: "auto",
-                  paddingBottom: 4,
-                  marginBottom: 16,
+                  paddingBottom: 8,
+                  marginBottom: 14,
                 }}
               >
                 {dateOptions.map((d) => (
                   <button
                     key={d.date}
-                    type="button"
                     onClick={() => setSelectedDate(d.date)}
                     style={{
                       flex: "0 0 auto",
-                      border: `2px solid ${
-                        selectedDate === d.date ? "var(--deep)" : "var(--line)"
-                      }`,
+                      padding: "8px 12px",
+                      border: `2px solid ${selectedDate === d.date ? "var(--amber)" : "var(--line)"}`,
                       borderRadius: "var(--radius-s)",
-                      padding: "8px 14px",
-                      background:
-                        selectedDate === d.date ? "var(--deep)" : "var(--white)",
-                      color:
-                        selectedDate === d.date ? "var(--white)" : "var(--ink)",
+                      background: selectedDate === d.date ? "#E4A13B11" : "var(--white)",
                       cursor: "pointer",
                       textAlign: "center",
-                      minWidth: 68,
-                      transition: "all 0.15s",
+                      minWidth: 60,
                     }}
                   >
-                    <div style={{ fontWeight: 700, fontSize: "0.82rem" }}>
-                      {d.label}
-                    </div>
-                    <div style={{ fontSize: "0.72rem", opacity: 0.8 }}>
-                      {d.dayName}
-                    </div>
+                    <div style={{ fontSize: "0.72rem", color: "var(--ink-soft)" }}>{d.dayName}</div>
+                    <div style={{ fontWeight: 600, fontSize: "0.88rem" }}>{d.label}</div>
                   </button>
                 ))}
               </div>
 
-              {/* Time slots */}
               {slotsLoading ? (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "28px 0",
-                    color: "var(--ink-soft)",
-                    fontSize: "0.88rem",
-                  }}
-                >
-                  Loading available slots...
+                <div style={{ textAlign: "center", padding: 20, color: "var(--ink-soft)" }}>
+                  Loading available times...
                 </div>
               ) : slots.length === 0 ? (
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "28px 0",
-                    color: "var(--ink-soft)",
-                    fontSize: "0.88rem",
-                    border: "1px dashed var(--line)",
-                    borderRadius: "var(--radius-m)",
-                  }}
-                >
-                  No availability for this date. Try another day.
+                <div style={{ textAlign: "center", padding: 20, color: "var(--ink-soft)" }}>
+                  No available slots for this date.
                 </div>
               ) : (
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))",
                     gap: 8,
                   }}
                 >
-                  {slots.map((slot) => {
-                    const isSelected =
-                      selectedSlot?.start === slot.start;
-                    return (
+                  {slots
+                    .filter((s) => s.available)
+                    .map((s, i) => (
                       <button
-                        key={slot.start}
-                        type="button"
-                        disabled={!slot.available}
-                        onClick={() => slot.available && setSelectedSlot(slot)}
+                        key={i}
+                        onClick={() => setSelectedSlot(s)}
                         style={{
-                          border: `1px solid ${
-                            isSelected ? "var(--deep)" : "var(--line)"
+                          padding: "10px 6px",
+                          border: `2px solid ${
+                            selectedSlot?.start === s.start
+                              ? "var(--amber)"
+                              : "var(--line)"
                           }`,
-                          background: isSelected
-                            ? "var(--deep)"
-                            : slot.available
-                            ? "var(--paper)"
-                            : "var(--paper-2)",
-                          color: isSelected
-                            ? "var(--white)"
-                            : slot.available
-                            ? "var(--ink)"
-                            : "var(--ink-soft)",
-                          padding: "9px 6px",
                           borderRadius: "var(--radius-s)",
-                          fontSize: "0.86rem",
+                          background:
+                            selectedSlot?.start === s.start
+                              ? "#E4A13B11"
+                              : "var(--white)",
+                          cursor: "pointer",
+                          fontSize: "0.85rem",
+                          fontWeight: 600,
                           textAlign: "center",
-                          cursor: slot.available ? "pointer" : "not-allowed",
-                          opacity: slot.available ? 1 : 0.5,
-                          transition: "all 0.15s",
                         }}
                       >
-                        {formatSlotTime(slot.start)}
+                        {formatSlotTime(s.start)}
                       </button>
-                    );
-                  })}
+                    ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* ── Step 6: Booking Summary ── */}
+          {/* ── Step 6: Summary ── */}
           {step === "summary" && (
             <div>
-              <h3 style={{ fontSize: "1.2rem", marginBottom: 16 }}>
+              <h3 style={{ fontSize: "1rem", marginBottom: 14, fontWeight: 600 }}>
                 Review your booking
               </h3>
-
-              <div
-                style={{
-                  border: "1px solid var(--line)",
-                  borderRadius: "var(--radius-m)",
-                  overflow: "hidden",
-                }}
-              >
-                {/* Vet info */}
-                <div
-                  style={{
-                    padding: "14px 16px",
-                    borderBottom: "1px solid var(--line)",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 42,
-                      height: 42,
-                      borderRadius: "50%",
-                      background: "var(--paper-2)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: "1.2rem",
-                      flexShrink: 0,
-                    }}
-                  >
-                    👨‍⚕️
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: "0.92rem" }}>
-                      Dr. {vetName}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "0.8rem",
-                        color: "var(--ink-soft)",
-                      }}
-                    >
-                      {vet.specialization}
-                    </div>
-                  </div>
-                </div>
-
-                <SummaryRow label="Pet" value={selectedPet?.name || ""} />
-                <SummaryRow
-                  label="Service"
-                  value={
-                    selectedService?.title ||
-                    SERVICE_LABELS[selectedService?.service_type || ""] ||
-                    ""
-                  }
-                />
-                <SummaryRow
-                  label="Urgency"
-                  value={URGENCY_LABELS[urgency] || urgency}
-                />
-                {symptoms && (
-                  <SummaryRow
-                    label="Concern"
-                    value={
-                      symptoms.length > 80
-                        ? symptoms.substring(0, 80) + "..."
-                        : symptoms
-                    }
-                  />
-                )}
-                <SummaryRow
-                  label="Date"
-                  value={formatSelectedDate()}
-                />
-                <SummaryRow
-                  label="Time"
-                  value={
-                    selectedSlot ? formatSlotTime(selectedSlot.start) : ""
-                  }
-                  noBorder
-                />
-              </div>
-
-              <div
-                style={{
-                  marginTop: 16,
-                  padding: "14px 16px",
-                  background: "var(--paper)",
-                  borderRadius: "var(--radius-s)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <span style={{ fontWeight: 600, fontSize: "0.92rem" }}>
-                  Total
-                </span>
-                <span
-                  style={{
-                    fontWeight: 700,
-                    fontSize: "1.15rem",
-                    color: "var(--deep)",
-                  }}
-                >
-                  {formatPrice(selectedService?.price || 0)}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* ── Step 7: Payment ── */}
-          {step === "payment" && (
-            <div style={{ textAlign: "center", padding: "10px 0" }}>
-              <div
-                style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: "50%",
-                  background: "var(--paper)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  margin: "0 auto 18px",
-                  fontSize: "1.5rem",
-                }}
-              >
-                💳
-              </div>
-              <h3 style={{ fontSize: "1.15rem", marginBottom: 6 }}>
-                Complete payment
-              </h3>
-              <p
-                style={{
-                  color: "var(--ink-soft)",
-                  fontSize: "0.88rem",
-                  marginBottom: 20,
-                }}
-              >
-                Confirm your booking with {vetName}.
-              </p>
-
               <div
                 style={{
                   border: "1px solid var(--line)",
                   borderRadius: "var(--radius-m)",
                   padding: 16,
-                  marginBottom: 20,
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginBottom: 8,
-                    fontSize: "0.88rem",
-                  }}
-                >
-                  <span style={{ color: "var(--ink-soft)" }}>Service</span>
-                  <span>
-                    {selectedService?.title || SERVICE_LABELS[selectedService?.service_type || ""]}
-                  </span>
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: "0.88rem",
-                    marginBottom: 8,
-                  }}
-                >
-                  <span style={{ color: "var(--ink-soft)" }}>Duration</span>
-                  <span>{selectedService?.duration_minutes || 30} min</span>
-                </div>
+                <SummaryRow label="Vet" value={`Dr. ${vetName}`} />
+                <SummaryRow label="Specialization" value={vet.specialization} />
+                <SummaryRow label="Pet" value={selectedPet?.name || "—"} />
+                <SummaryRow
+                  label="Service"
+                  value={selectedService?.title || SERVICE_LABELS[selectedService?.service_type || ""] || "—"}
+                />
+                <SummaryRow label="Date" value={formatSelectedDate()} />
+                <SummaryRow
+                  label="Time"
+                  value={selectedSlot ? formatSlotTime(selectedSlot.start) : "—"}
+                />
+                <SummaryRow
+                  label="Urgency"
+                  value={URGENCY_LABELS[urgency as keyof typeof URGENCY_LABELS] || urgency}
+                  color={URGENCY_COLORS[urgency as keyof typeof URGENCY_COLORS]?.text || "var(--ink)"}
+                />
+                {symptoms && (
+                  <SummaryRow label="Concern" value={symptoms} italic />
+                )}
+                <SummaryRow
+                  label="Consultation fee"
+                  value={urgencyPrice !== null ? formatPrice(urgencyPrice) : "—"}
+                  bold
+                />
                 <div
                   style={{
                     borderTop: "1px solid var(--line)",
-                    paddingTop: 8,
-                    marginTop: 4,
+                    marginTop: 10,
+                    paddingTop: 10,
                     display: "flex",
                     justifyContent: "space-between",
-                    fontWeight: 700,
-                    fontSize: "1rem",
                   }}
                 >
-                  <span>Total</span>
-                  <span style={{ color: "var(--deep)" }}>
-                    {formatPrice(selectedService?.price || 0)}
+                  <span style={{ fontWeight: 600, fontSize: "0.92rem" }}>
+                    Total
+                  </span>
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      fontSize: "1.15rem",
+                      color: "var(--deep)",
+                    }}
+                  >
+                    {urgencyPrice !== null ? formatPrice(urgencyPrice) : "—"}
                   </span>
                 </div>
               </div>
-
-              {error && (
-                <div
-                  style={{
-                    color: "var(--rose)",
-                    fontSize: "0.85rem",
-                    marginBottom: 14,
-                    textAlign: "left",
-                  }}
-                >
-                  {error}
-                </div>
-              )}
-
-              <button
-                className="btn-amber"
-                style={{ width: "100%" }}
-                onClick={handlePayment}
-                disabled={paymentProcessing}
-              >
-                {paymentProcessing
-                  ? "Processing..."
-                  : `Pay ${formatPrice(selectedService?.price || 0)}`}
-              </button>
             </div>
           )}
 
-          {/* ── Step 8: Confirmation ── */}
-          {step === "confirmation" && (
-            <div style={{ textAlign: "center", padding: "10px 0 4px" }}>
+          {/* ── Step 7: Confirmation / Success ── */}
+          {step === "confirmation" && confirmedBooking && (
+            <div style={{ textAlign: "center", padding: "6px 0 4px" }}>
               <div
                 style={{
-                  width: 56,
-                  height: 56,
+                  width: 60,
+                  height: 60,
                   borderRadius: "50%",
-                  background: "#4C8B5B",
+                  background: "var(--deep)",
                   color: "var(--white)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   margin: "0 auto 18px",
-                  fontSize: "1.6rem",
+                  fontSize: "1.8rem",
                 }}
               >
                 ✓
               </div>
-              <h3 style={{ fontSize: "1.2rem", marginBottom: 4 }}>
-                You&apos;re booked!
+              <h3 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: 4, color: "var(--deep)" }}>
+                Payment successful
               </h3>
               <p
                 style={{
                   color: "var(--ink-soft)",
                   fontSize: "0.88rem",
-                  marginBottom: 18,
+                  marginBottom: 20,
                 }}
               >
-                Dr. {vetName} will see {selectedPet?.name || "your pet"} on{" "}
-                {formatSelectedDate()} at{" "}
-                {selectedSlot ? formatSlotTime(selectedSlot.start) : ""}.
+                Your consultation has been booked successfully.
               </p>
 
               <div
                 style={{
                   background: "var(--paper)",
-                  border: "1px dashed var(--line)",
-                  borderRadius: "var(--radius-s)",
-                  padding: 12,
-                  fontFamily: "var(--font-fraunces), Fraunces, serif",
-                  fontWeight: 600,
-                  marginBottom: 18,
-                  fontSize: "0.92rem",
+                  border: "1px solid var(--line)",
+                  borderRadius: "var(--radius-m)",
+                  padding: "16px 20px",
+                  textAlign: "left",
+                  marginBottom: 20,
                 }}
               >
-                Booking ref: {bookingRef}
+                <SummaryRow label="Vet" value={`Dr. ${confirmedBooking.vetName}`} />
+                <SummaryRow label="Pet" value={confirmedBooking.petName} />
+                <SummaryRow label="Service" value={confirmedBooking.serviceTitle} />
+                <SummaryRow label="Date" value={confirmedBooking.date} />
+                <SummaryRow label="Time" value={confirmedBooking.time} />
+                <SummaryRow label="Urgency" value={confirmedBooking.urgency} />
+                <SummaryRow
+                  label="Total"
+                  value={formatPrice(confirmedBooking.price)}
+                  bold
+                />
+                <div
+                  style={{
+                    borderTop: "1px dashed var(--line)",
+                    marginTop: 10,
+                    paddingTop: 10,
+                    display: "flex",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span style={{ fontSize: "0.85rem", color: "var(--ink-soft)" }}>
+                    Booking reference
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--font-fraunces), Fraunces, serif",
+                      fontWeight: 700,
+                      fontSize: "0.92rem",
+                      color: "var(--deep)",
+                    }}
+                  >
+                    {confirmedBooking.bookingRef}
+                  </span>
+                </div>
               </div>
 
               {selectedService?.service_type === "home_visit" && bookingId && (
                 <TrackingBox bookingId={bookingId} />
               )}
 
-              <button
-                className="btn-amber"
-                style={{ width: "100%", marginTop: 8 }}
-                onClick={onClose}
-              >
-                Done
-              </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <button
+                  className="btn-amber"
+                  style={{ width: "100%" }}
+                  onClick={() => {
+                    window.location.href = "/dashboard/owner";
+                  }}
+                >
+                  View my booking
+                </button>
+                <button
+                  onClick={onClose}
+                  style={{
+                    width: "100%",
+                    padding: "11px 18px",
+                    border: "1px solid var(--line)",
+                    borderRadius: "var(--radius-s)",
+                    background: "var(--white)",
+                    color: "var(--ink)",
+                    fontWeight: 600,
+                    fontSize: "0.9rem",
+                    cursor: "pointer",
+                  }}
+                >
+                  Back to PetTails
+                </button>
+              </div>
             </div>
           )}
 
           {/* Error display */}
-          {step !== "payment" && step !== "confirmation" && error && (
+          {error && step !== "confirmation" && (
             <div
               style={{
                 color: "var(--rose)",
@@ -1302,7 +1117,7 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
         </div>
 
         {/* Navigation footer */}
-        {step !== "payment" && step !== "confirmation" && (
+        {step !== "confirmation" && (
           <div
             style={{
               padding: "14px 28px 20px",
@@ -1315,6 +1130,7 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
               <button
                 type="button"
                 onClick={handleBack}
+                disabled={loading}
                 style={{
                   flex: "0 0 auto",
                   border: "1px solid var(--line)",
@@ -1324,7 +1140,8 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
                   color: "var(--ink)",
                   fontWeight: 600,
                   fontSize: "0.9rem",
-                  cursor: "pointer",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  opacity: loading ? 0.5 : 1,
                 }}
               >
                 ← Back
@@ -1335,14 +1152,10 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
               style={{ flex: 1 }}
               onClick={
                 step === "summary"
-                  ? () => {
-                      setLoading(true);
-                      setError(null);
-                      handleCreateBooking();
-                    }
+                  ? handleConfirmAndPay
                   : handleNext
               }
-              disabled={loading}
+              disabled={loading || (step === "urgency" && (urgencyPriceLoading || urgencyPrice === null))}
             >
               {loading
                 ? "Booking..."
@@ -1360,24 +1173,38 @@ export function BookingModal({ vet, onClose }: BookingModalProps) {
 function SummaryRow({
   label,
   value,
-  noBorder = false,
+  color,
+  italic,
+  bold,
 }: {
   label: string;
   value: string;
-  noBorder?: boolean;
+  color?: string;
+  italic?: boolean;
+  bold?: boolean;
 }) {
   return (
     <div
       style={{
-        padding: "10px 16px",
         display: "flex",
         justifyContent: "space-between",
-        fontSize: "0.86rem",
-        borderBottom: noBorder ? "none" : "1px solid var(--line)",
+        padding: "6px 0",
+        fontSize: "0.88rem",
+        borderBottom: "1px solid #f0f0f0",
       }}
     >
       <span style={{ color: "var(--ink-soft)" }}>{label}</span>
-      <span style={{ fontWeight: 600, textAlign: "right" }}>{value}</span>
+      <span
+        style={{
+          fontWeight: bold ? 700 : 500,
+          color: color || "var(--ink)",
+          fontStyle: italic ? "italic" : "normal",
+          textAlign: "right",
+          maxWidth: "60%",
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }

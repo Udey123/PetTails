@@ -198,12 +198,26 @@ export default function VetDashboard() {
       profiles: ownerProfilesMap.get(b.owner_id as string) || null,
     }));
 
+    const petIds = (bookingsData || []).map((b) => b.pet_id as string).filter(Boolean);
+    let petsMap = new Map<string, { name: string; species: string }>();
+    if (petIds.length > 0) {
+      const petsData = await safeQuery<{ id: string; name: string; species: string }[]>(
+        supabase.from("pets").select("id, name, species").in("id", petIds)
+      );
+      petsMap = new Map((petsData || []).map((p) => [p.id, p]));
+    }
+
+    const finalBookings = enrichedBookings.map((b) => ({
+      ...b,
+      pets: petsMap.get(b.pet_id as string) || null,
+    }));
+
     const enrichedReviews = (reviewsData || []).map((r) => ({
       ...r,
       profiles: ownerProfilesMap.get(r.owner_id as string) || null,
     }));
 
-    setBookings(enrichedBookings);
+    setBookings(finalBookings);
     setServices(servicesData || []);
     setAvailability(availData || []);
     setReviews(enrichedReviews);
@@ -247,7 +261,7 @@ export default function VetDashboard() {
         { event: "*", schema: "public", table: "bookings" },
         async () => {
           const data = await safeQuery<Any[]>(
-            supabase.from("bookings").select("*, pets(name, species)").eq("vet_id", vid).order("scheduled_at", { ascending: false })
+            supabase.from("bookings").select("*").eq("vet_id", vid).order("scheduled_at", { ascending: false })
           );
           if (data) {
             const ownerIds = data.map((b) => b.owner_id as string).filter(Boolean);
@@ -258,9 +272,18 @@ export default function VetDashboard() {
               );
               ownerMap = new Map((owners || []).map((p) => [p.id, p]));
             }
+            const petIds = data.map((b) => b.pet_id as string).filter(Boolean);
+            let petsMap = new Map<string, { name: string; species: string }>();
+            if (petIds.length > 0) {
+              const pets = await safeQuery<{ id: string; name: string; species: string }[]>(
+                supabase.from("pets").select("id, name, species").in("id", petIds)
+              );
+              petsMap = new Map((pets || []).map((p) => [p.id, p]));
+            }
             setBookings(data.map((b) => ({
               ...b,
               profiles: ownerMap.get(b.owner_id as string) || null,
+              pets: petsMap.get(b.pet_id as string) || null,
             })));
           }
         }
@@ -353,8 +376,9 @@ export default function VetDashboard() {
       if (data) {
         setServices((prev) =>
           prev.map((s) => (s.id === data.id ? data : s))
-        );
-      }
+  );
+}
+
     } else {
       const { data, error } = await supabase
         .from("vet_services")
@@ -889,8 +913,8 @@ export default function VetDashboard() {
                                 marginTop: 2,
                               }}
                             >
-                              {formatDate(b.scheduled_at)} · Ref:{" "}
-                              {b.booking_reference}
+{formatDate(b.scheduled_at)} · Ref:{" "}
+{b.booking_reference}
                             </div>
                             {b.concern && (
                               <div
@@ -967,6 +991,30 @@ export default function VetDashboard() {
                               paddingTop: 12,
                             }}
                           >
+                            {b.service_type === "video_consult" && (() => {
+                              const scheduled = new Date(b.scheduled_at).getTime();
+                              const now = Date.now();
+                              const joinWindow = now >= scheduled - 10 * 60 * 1000 && now <= scheduled + 2 * 60 * 60 * 1000;
+                              if (joinWindow) {
+                                return (
+                                  <a
+                                    href={`/consultation/${b.id}`}
+                                    style={{
+                                      padding: "8px 16px",
+                                      borderRadius: "var(--radius-s)",
+                                      background: "var(--deep)",
+                                      color: "var(--white)",
+                                      fontWeight: 600,
+                                      fontSize: "0.85rem",
+                                      textDecoration: "none",
+                                    }}
+                                  >
+                                    📹 Join Video
+                                  </a>
+                                );
+                              }
+                              return null;
+                            })()}
                             <button
                               className="btn-primary"
                               style={{ padding: "8px 16px", fontSize: "0.85rem" }}
@@ -988,6 +1036,56 @@ export default function VetDashboard() {
                               }
                             >
                               Complete
+                            </button>
+                            <button
+                              className="btn-danger"
+                              style={{ fontSize: "0.85rem" }}
+                              onClick={() =>
+                                updateBookingStatus(b.id, "no_show")
+                              }
+                            >
+                              No-show
+                            </button>
+                          </div>
+                        )}
+                        {b.status === "in_progress" && (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              marginTop: 12,
+                              borderTop: "1px solid var(--line)",
+                              paddingTop: 12,
+                            }}
+                          >
+                            {b.service_type === "video_consult" && (
+                              <a
+                                href={`/consultation/${b.id}`}
+                                style={{
+                                  padding: "8px 16px",
+                                  borderRadius: "var(--radius-s)",
+                                  background: "var(--deep)",
+                                  color: "var(--white)",
+                                  fontWeight: 600,
+                                  fontSize: "0.85rem",
+                                  textDecoration: "none",
+                                }}
+                              >
+                                📹 Join Video
+                              </a>
+                            )}
+                            <button
+                              className="btn-primary"
+                              style={{
+                                padding: "8px 16px",
+                                fontSize: "0.85rem",
+                                background: "#4C8B5B",
+                              }}
+                              onClick={() =>
+                                updateBookingStatus(b.id, "completed")
+                              }
+                            >
+                              ✓ Complete Consultation
                             </button>
                             <button
                               className="btn-danger"
@@ -1233,6 +1331,7 @@ export default function VetDashboard() {
               </button>
             </div>
             <ProfileEditor vet={vet} onSave={handleSaveProfile} />
+            <MeetLinkEditor />
           </div>
         )}
 
@@ -1255,6 +1354,213 @@ export default function VetDashboard() {
           .stats-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
+    </div>
+  );
+}
+
+function MeetLinkEditor() {
+  const [meetUrl, setMeetUrl] = useState("");
+  const [savedUrl, setSavedUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch("/api/vet/meet-link");
+        const data = await res.json();
+        if (res.ok) {
+          setSavedUrl(data.google_meet_url);
+          setMeetUrl(data.google_meet_url || "");
+        }
+      } catch {
+        // ignore
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  function isValidMeetUrl(url: string): boolean {
+    if (!url.trim()) return false;
+    try {
+      const parsed = new URL(url);
+      return (
+        parsed.protocol === "https:" &&
+        parsed.hostname === "meet.google.com" &&
+        parsed.pathname.split("/").filter(Boolean).length >= 1
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async function handleSave() {
+    if (!isValidMeetUrl(meetUrl)) {
+      setMessage({ type: "error", text: "Please enter a valid Google Meet link." });
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/vet/meet-link", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ google_meet_url: meetUrl.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSavedUrl(meetUrl.trim());
+        setEditing(false);
+        setMessage({ type: "success", text: "Google Meet link saved" });
+      } else {
+        setMessage({ type: "error", text: data.error || "Failed to save" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Failed to save" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemove() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/vet/meet-link", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ google_meet_url: "" }),
+      });
+      if (res.ok) {
+        setSavedUrl(null);
+        setMeetUrl("");
+        setEditing(false);
+        setMessage({ type: "success", text: "Google Meet link removed" });
+      } else {
+        const data = await res.json();
+        setMessage({ type: "error", text: data.error || "Failed to remove" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Failed to remove" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="card" style={{ padding: 22, marginTop: 20 }}>
+        <p style={{ color: "var(--ink-soft)" }}>Loading...</p>
+      </div>
+    );
+  }
+
+  const isConnected = !!savedUrl;
+
+  return (
+    <div className="card" style={{ padding: 22, marginTop: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <h4 style={{ fontSize: "1rem" }}>Video Consultation</h4>
+        <span
+          style={{
+            fontSize: "0.78rem",
+            fontWeight: 600,
+            padding: "3px 10px",
+            borderRadius: 20,
+            background: isConnected ? "#4C8B5B15" : "var(--line)",
+            color: isConnected ? "#4C8B5B" : "var(--ink-soft)",
+          }}
+        >
+          {isConnected ? "✓ Connected" : "○ Not connected"}
+        </span>
+      </div>
+      <p style={{ fontSize: "0.85rem", color: "var(--ink-soft)", marginBottom: 16 }}>
+        Add the Google Meet link you use for your video consultations.
+      </p>
+
+      <label style={{ display: "block", fontSize: "0.88rem", fontWeight: 600, marginBottom: 6 }}>
+        Google Meet link
+      </label>
+      <input
+        type="url"
+        value={meetUrl}
+        onChange={(e) => setMeetUrl(e.target.value)}
+        placeholder="https://meet.google.com/abc-defg-hij"
+        disabled={!editing && isConnected}
+        style={{
+          width: "100%",
+          padding: "10px 14px",
+          border: `1px solid ${message?.type === "error" ? "var(--rose)" : "var(--line)"}`,
+          borderRadius: "var(--radius-s)",
+          fontSize: "0.9rem",
+          marginBottom: 12,
+          background: !editing && isConnected ? "var(--paper)" : "var(--white)",
+          color: !editing && isConnected ? "var(--ink-soft)" : "var(--ink)",
+          opacity: !editing && isConnected ? 0.7 : 1,
+        }}
+      />
+
+      <p style={{ fontSize: "0.78rem", color: "var(--ink-soft)", marginTop: -8, marginBottom: 12 }}>
+        This link will be used for your confirmed video consultations.
+      </p>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        {!isConnected || editing ? (
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="btn-amber"
+            style={{ fontSize: "0.88rem" }}
+          >
+            {saving ? "Saving..." : "Save Google Meet Link"}
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={() => { setEditing(true); setMessage(null); }}
+              className="btn-amber"
+              style={{ fontSize: "0.88rem" }}
+            >
+              Edit Link
+            </button>
+            <button
+              onClick={handleRemove}
+              disabled={saving}
+              style={{
+                fontSize: "0.88rem",
+                padding: "8px 16px",
+                borderRadius: "var(--radius-s)",
+                border: "1px solid var(--line)",
+                background: "var(--white)",
+                cursor: "pointer",
+                color: "var(--rose)",
+                fontWeight: 500,
+              }}
+            >
+              {saving ? "Removing..." : "Remove Link"}
+            </button>
+          </>
+        )}
+      </div>
+
+      {message && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: "8px 12px",
+            borderRadius: "var(--radius-s)",
+            fontSize: "0.85rem",
+            background: message.type === "success" ? "#4C8B5B15" : "#C9727A15",
+            color: message.type === "success" ? "#4C8B5B" : "var(--rose)",
+          }}
+        >
+          {message.text}
+        </div>
+      )}
     </div>
   );
 }
