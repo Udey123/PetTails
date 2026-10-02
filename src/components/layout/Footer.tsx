@@ -144,67 +144,9 @@ export function Footer() {
           <span>© 2026 PetTails. All rights reserved.</span>
           <span>Made for pet owners who can&apos;t always wait.</span>
         </div>
-
-        <div
-          style={{
-            textAlign: "center",
-            paddingTop: 22,
-            marginTop: 22,
-            borderTop: "1px solid rgba(255, 255, 255, 0.13)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.78rem",
-              color: "#8CA095",
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              marginBottom: 10,
-            }}
-          >
-            Built by
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "center",
-              gap: "10px 22px",
-            }}
-          >
-            {["Uday", "Vanshika", "Vikas", "Shreya", "Izaan"].map(
-              (name, i) => (
-                <span
-                  key={name}
-                  className="shine-name foot-shine"
-                  style={{ animationDelay: `${i * 0.3}s` }}
-                >
-                  {name}
-                </span>
-              )
-            )}
-          </div>
-        </div>
       </div>
 
       <style>{`
-        .foot-shine {
-          background: linear-gradient(
-            100deg,
-            #D8E1DA 30%,
-            #D8E1DA 40%,
-            var(--amber) 48%,
-            #fff6df 50%,
-            var(--amber) 52%,
-            #D8E1DA 60%,
-            #D8E1DA 100%
-          );
-          background-size: 250% 100%;
-          background-position: 100% 0;
-          -webkit-background-clip: text;
-          background-clip: text;
-          color: transparent;
-        }
         .foot-grid a:hover { color: #FFFFFF !important; }
         @media (max-width: 760px) {
           .foot-grid { grid-template-columns: 1fr 1fr !important; }
