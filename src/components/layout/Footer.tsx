@@ -2,7 +2,7 @@ import Link from "next/link";
 
 export function Footer() {
   return (
-    <footer style={{ padding: "56px 0 34px" }}>
+    <footer style={{ background: "var(--deep-2)", color: "#D8E1DA", padding: "60px 0 34px" }}>
       <div className="wrap">
         <div
           style={{
@@ -10,7 +10,7 @@ export function Footer() {
             gridTemplateColumns: "1.4fr repeat(3, 1fr)",
             gap: 32,
             paddingBottom: 40,
-            borderBottom: "1px solid var(--line)",
+            borderBottom: "1px solid rgba(255, 255, 255, 0.13)",
           }}
           className="foot-grid"
         >
@@ -25,7 +25,7 @@ export function Footer() {
                 fontWeight: 700,
                 fontSize: "1.35rem",
                 textDecoration: "none",
-                color: "var(--ink)",
+                color: "#F5F2E7",
               }}
             >
               <span
@@ -33,7 +33,7 @@ export function Footer() {
                   width: 26,
                   height: 26,
                   borderRadius: "50%",
-                  background: "var(--deep)",
+                  background: "#F5F2E7",
                   position: "relative",
                   flex: "none",
                   display: "inline-block",
@@ -52,7 +52,7 @@ export function Footer() {
             </Link>
             <p
               style={{
-                color: "var(--ink-soft)",
+                color: "#A9BCB0",
                 fontSize: "0.92rem",
                 marginTop: 12,
                 maxWidth: "32ch",
@@ -64,22 +64,22 @@ export function Footer() {
           </div>
 
           <div>
-            <h4 style={{ fontSize: "0.85rem", marginBottom: 14 }}>
+            <h4 style={{ fontSize: "0.85rem", marginBottom: 14, color: "var(--amber)" }}>
               Pet owners
             </h4>
             <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 9 }}>
               <li>
-                <Link href="/#hail" style={{ textDecoration: "none", color: "var(--ink-soft)", fontSize: "0.92rem" }}>
+                <Link href="/#hail" style={{ textDecoration: "none", color: "#C3D0C7", fontSize: "0.92rem" }}>
                   Hail a vet
                 </Link>
               </li>
               <li>
-                <Link href="/#vets" style={{ textDecoration: "none", color: "var(--ink-soft)", fontSize: "0.92rem" }}>
+                <Link href="/#vets" style={{ textDecoration: "none", color: "#C3D0C7", fontSize: "0.92rem" }}>
                   Browse vets
                 </Link>
               </li>
               <li>
-                <Link href="/#services" style={{ textDecoration: "none", color: "var(--ink-soft)", fontSize: "0.92rem" }}>
+                <Link href="/#services" style={{ textDecoration: "none", color: "#C3D0C7", fontSize: "0.92rem" }}>
                   Services
                 </Link>
               </li>
@@ -87,20 +87,20 @@ export function Footer() {
           </div>
 
           <div>
-            <h4 style={{ fontSize: "0.85rem", marginBottom: 14 }}>Vets</h4>
+            <h4 style={{ fontSize: "0.85rem", marginBottom: 14, color: "var(--amber)" }}>Vets</h4>
             <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 9 }}>
               <li>
-                <Link href="/#partner" style={{ textDecoration: "none", color: "var(--ink-soft)", fontSize: "0.92rem" }}>
+                <Link href="/#partner" style={{ textDecoration: "none", color: "#C3D0C7", fontSize: "0.92rem" }}>
                   Join the network
                 </Link>
               </li>
               <li>
-                <span style={{ color: "var(--ink-soft)", fontSize: "0.92rem" }}>
+                <span style={{ color: "#C3D0C7", fontSize: "0.92rem" }}>
                   Earnings
                 </span>
               </li>
               <li>
-                <span style={{ color: "var(--ink-soft)", fontSize: "0.92rem" }}>
+                <span style={{ color: "#C3D0C7", fontSize: "0.92rem" }}>
                   Requirements
                 </span>
               </li>
@@ -108,20 +108,20 @@ export function Footer() {
           </div>
 
           <div>
-            <h4 style={{ fontSize: "0.85rem", marginBottom: 14 }}>Company</h4>
+            <h4 style={{ fontSize: "0.85rem", marginBottom: 14, color: "var(--amber)" }}>Company</h4>
             <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 9 }}>
               <li>
-                <span style={{ color: "var(--ink-soft)", fontSize: "0.92rem" }}>
+                <span style={{ color: "#C3D0C7", fontSize: "0.92rem" }}>
                   About
                 </span>
               </li>
               <li>
-                <span style={{ color: "var(--ink-soft)", fontSize: "0.92rem" }}>
+                <span style={{ color: "#C3D0C7", fontSize: "0.92rem" }}>
                   Support
                 </span>
               </li>
               <li>
-                <span style={{ color: "var(--ink-soft)", fontSize: "0.92rem" }}>
+                <span style={{ color: "#C3D0C7", fontSize: "0.92rem" }}>
                   Trust &amp; safety
                 </span>
               </li>
@@ -136,7 +136,7 @@ export function Footer() {
             alignItems: "center",
             paddingTop: 24,
             fontSize: "0.84rem",
-            color: "var(--ink-soft)",
+            color: "#8CA095",
             flexWrap: "wrap",
             gap: 10,
           }}
@@ -150,13 +150,13 @@ export function Footer() {
             textAlign: "center",
             paddingTop: 22,
             marginTop: 22,
-            borderTop: "1px solid var(--line)",
+            borderTop: "1px solid rgba(255, 255, 255, 0.13)",
           }}
         >
           <div
             style={{
               fontSize: "0.78rem",
-              color: "var(--ink-soft)",
+              color: "#8CA095",
               letterSpacing: "0.06em",
               textTransform: "uppercase",
               marginBottom: 10,
@@ -176,7 +176,7 @@ export function Footer() {
               (name, i) => (
                 <span
                   key={name}
-                  className="shine-name"
+                  className="shine-name foot-shine"
                   style={{ animationDelay: `${i * 0.3}s` }}
                 >
                   {name}
@@ -188,6 +188,24 @@ export function Footer() {
       </div>
 
       <style>{`
+        .foot-shine {
+          background: linear-gradient(
+            100deg,
+            #D8E1DA 30%,
+            #D8E1DA 40%,
+            var(--amber) 48%,
+            #fff6df 50%,
+            var(--amber) 52%,
+            #D8E1DA 60%,
+            #D8E1DA 100%
+          );
+          background-size: 250% 100%;
+          background-position: 100% 0;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+        .foot-grid a:hover { color: #FFFFFF !important; }
         @media (max-width: 760px) {
           .foot-grid { grid-template-columns: 1fr 1fr !important; }
         }

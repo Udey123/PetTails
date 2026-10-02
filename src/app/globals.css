@@ -17,6 +17,85 @@
   --radius-m: 10px;
   --shadow: 0 1px 2px rgba(18, 31, 25, 0.06);
   --maxw: 1180px;
+
+  /* Floating header (glass) — light theme */
+  --nav-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --nav-glass: rgba(255, 254, 250, 0.58);
+  --nav-glass-2: rgba(255, 254, 250, 0.84);
+  --nav-border: rgba(28, 42, 33, 0.07);
+  --nav-shadow: 0 10px 32px rgba(24, 44, 32, 0.07), 0 2px 6px rgba(24, 44, 32, 0.05);
+  --nav-shadow-2: 0 16px 44px rgba(24, 44, 32, 0.13), 0 3px 10px rgba(24, 44, 32, 0.07);
+  --nav-blur: 16px;
+  --nav-blur-2: 26px;
+  --nav-sat: 1.4;
+  --nav-sat-2: 1.6;
+  --nav-ink: #1C2A21;
+  --nav-ink-soft: #4A5A4E;
+  --nav-hover-bg: rgba(18, 56, 50, 0.07);
+  --nav-active-bg: #E1EFE4;
+  --nav-active-ink: #1B4536;
+  --nav-active-bg-hover: #D4E9DA;
+  --nav-track: rgba(18, 56, 50, 0.06);
+  --nav-tog-on: #FFFDF8;
+  --nav-tog-off: #123832;
+  --nav-tog-shadow: 0 1px 3px rgba(24, 44, 32, 0.2);
+  --nav-cta-bg: #123832;
+  --nav-cta-ink: #FFFDF8;
+  --nav-login-bg: #FFFEFA;
+  --nav-login-border: rgba(28, 42, 33, 0.5);
+  --nav-login-hover: #F1EEE4;
+  --nav-logout-bg: #F1EEE4;
+  --nav-logout-ink: #24352C;
+  --nav-loc: #24352C;
+  --nav-div: rgba(28, 42, 33, 0.16);
+  --nav-av-border: rgba(28, 42, 33, 0.1);
+  --nav-flat-bg: rgba(240, 238, 225, 0.92);
+  --nav-flat-border: #D3CEB9;
+}
+
+/* Header-only dark theme: same layout, deep green / charcoal glass (never pure black) */
+.nav-float.nav-dark,
+.nav-bar.nav-dark {
+  --nav-glass: rgba(14, 31, 26, 0.55);
+  --nav-glass-2: rgba(12, 27, 23, 0.8);
+  --nav-border: rgba(183, 209, 189, 0.18);
+  --nav-shadow: 0 12px 36px rgba(0, 0, 0, 0.36), 0 2px 6px rgba(0, 0, 0, 0.24);
+  --nav-shadow-2: 0 18px 48px rgba(0, 0, 0, 0.46), 0 4px 12px rgba(0, 0, 0, 0.3);
+  --nav-blur: 18px;
+  --nav-blur-2: 30px;
+  --nav-ink: #EFF4EC;
+  --nav-ink-soft: #C3D2C4;
+  --nav-hover-bg: rgba(214, 236, 218, 0.12);
+  --nav-active-bg: rgba(103, 201, 145, 0.22);
+  --nav-active-ink: #A8E6BE;
+  --nav-active-bg-hover: rgba(103, 201, 145, 0.32);
+  --nav-track: rgba(255, 255, 255, 0.08);
+  --nav-tog-on: rgba(103, 201, 145, 0.95);
+  --nav-tog-off: rgba(240, 248, 240, 0.12);
+  --nav-tog-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  --nav-cta-bg: #2E6B52;
+  --nav-cta-ink: #F1F7F1;
+  --nav-login-bg: rgba(255, 255, 255, 0.06);
+  --nav-login-border: rgba(216, 236, 220, 0.4);
+  --nav-login-hover: rgba(255, 255, 255, 0.13);
+  --nav-logout-bg: rgba(255, 255, 255, 0.1);
+  --nav-logout-ink: #DCE7DD;
+  --nav-loc: #C4D4C6;
+  --nav-div: rgba(230, 245, 233, 0.2);
+  --nav-av-border: rgba(230, 245, 233, 0.22);
+  --nav-flat-bg: rgba(13, 27, 23, 0.92);
+  --nav-flat-border: rgba(183, 209, 189, 0.16);
+}
+
+/* Reserve the floating header's layout space (header is position: fixed) */
+.main-float {
+  padding-top: 65px;
+}
+
+@media (max-width: 1024px) {
+  .main-float {
+    padding-top: 55px;
+  }
 }
 
 * {

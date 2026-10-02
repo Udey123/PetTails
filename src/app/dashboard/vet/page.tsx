@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import {
   formatDate,
+  formatTime,
   formatPrice,
   SERVICE_LABELS,
   STATUS_LABELS,
@@ -22,10 +23,12 @@ import type {
   Vet,
   ServiceType,
 } from "@/lib/types";
+import { toStringArray } from "@/lib/ai/petCareSchema";
 
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "bookings", label: "Bookings" },
+  { id: "ai-handoffs", label: "AI Handoffs" },
   { id: "services", label: "Services" },
   { id: "availability", label: "Availability" },
   { id: "profile", label: "Profile" },
@@ -35,15 +38,45 @@ const TABS = [
 type Tab = (typeof TABS)[number]["id"];
 type BookingFilter = "all" | "pending" | "confirmed" | "completed" | "cancelled";
 
+interface AIHandoff {
+  id: string;
+  session_id: string;
+  user_id: string;
+  vet_id: string | null;
+  case_summary: string | null;
+  urgency: string | null;
+  specialty: string | null;
+  status: string;
+  created_at: string;
+  profiles?: { name: string } | null;
+  pet_snapshot?: {
+    name?: string | null;
+    species?: string | null;
+    breed?: string | null;
+    age?: string | null;
+  } | null;
+  triage_snapshot?: {
+    observations?: string[];
+    red_flags?: string[];
+    missing_information?: string[];
+    guidance?: {
+      what_you_can_do?: string[];
+      monitor_for?: string[];
+      contact_vet_if?: string[];
+    };
+  } | null;
+}
+
 function StatusBadge({ status }: { status: string }) {
   const colors = STATUS_COLORS[status] || { bg: "#E4A13B22", text: "#C6842A" };
   return (
     <span
       style={{
-        padding: "4px 10px",
+        padding: "5px 11px",
         borderRadius: 100,
-        fontSize: "0.78rem",
-        fontWeight: 600,
+        fontSize: "0.76rem",
+        fontWeight: 700,
+        letterSpacing: "0.01em",
         background: colors.bg,
         color: colors.text,
       }}
@@ -62,10 +95,11 @@ function UrgencyBadge({ urgency }: { urgency: string }) {
   return (
     <span
       style={{
-        padding: "3px 8px",
+        padding: "4px 10px",
         borderRadius: 100,
-        fontSize: "0.72rem",
+        fontSize: "0.74rem",
         fontWeight: 700,
+        letterSpacing: "0.01em",
         background: colors.bg,
         color: colors.text,
         border: `1px solid ${colors.border}`,
@@ -102,6 +136,81 @@ function PaymentBadge({ status }: { status: string }) {
   );
 }
 
+function Ico({
+  d,
+  size = 18,
+  cls,
+}: {
+  d: string;
+  size?: number;
+  cls?: string;
+}) {
+  return (
+    <svg
+      className={cls}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={d} />
+    </svg>
+  );
+}
+
+function ownerInitials(name?: string | null) {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "PO";
+  return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
+}
+
+const SIDEBAR_ICONS: Record<Tab, string> = {
+  overview:
+    "M3.5 10.7 12 3.5l8.5 7.2M5.8 9.6V19.6a1 1 0 0 0 1 1H10v-5.4h4v5.4h3.2a1 1 0 0 0 1-1V9.6",
+  bookings:
+    "M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5v12A1.5 1.5 0 0 1 17.5 20h-11A1.5 1.5 0 0 1 5 18.5zM8 3v4M16 3v4M5 10h14",
+  "ai-handoffs":
+    "M12 4l1.7 4.3L18 10l-4.3 1.7L12 16l-1.7-4.3L6 10l4.3-1.7zM18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z",
+  services: "M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7zM4.5 7.7 12 12l7.5-4.3M12 12v8.5",
+  availability:
+    "M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM12 7.8V12l2.8 1.8",
+  profile:
+    "M12 11.5a3.8 3.8 0 1 0 0-7.6 3.8 3.8 0 0 0 0 7.6zM4.8 20c1.1-3 3.8-4.7 7.2-4.7s6.1 1.7 7.2 4.7",
+  verification:
+    "M12 3.5l7 2.8v5c0 4.2-2.9 7.9-7 9.2-4.1-1.3-7-5-7-9.2v-5zM9.2 11.8l2 2 3.6-3.8",
+};
+
+const ICONS = {
+  calendar:
+    "M5 6.5A1.5 1.5 0 0 1 6.5 5h11A1.5 1.5 0 0 1 19 6.5v12A1.5 1.5 0 0 1 17.5 20h-11A1.5 1.5 0 0 1 5 18.5zM8 3v4M16 3v4M5 10h14",
+  clock: "M12 20.5a8.5 8.5 0 1 0 0-17 8.5 8.5 0 0 0 0 17zM12 7.8V12l2.8 1.8",
+  check: "M5.5 12.5l4.3 4.3 8.7-9",
+  wallet:
+    "M4.5 8V18a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2M4.5 8a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2M4.5 8h15M16 14.5h1.5",
+  star: "M12 4.5l2.3 4.7 5.2.7-3.8 3.6.9 5.1L12 16.1l-4.6 2.5.9-5.1-3.8-3.6 5.2-.7z",
+  message:
+    "M4.5 6.5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H10l-4 3.5V16.5H6.5a2 2 0 0 1-2-2z",
+  box: "M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7zM4.5 7.7 12 12l7.5-4.3M12 12v8.5",
+  arrow: "M5 12h13M12.5 6.5 19 12l-6.5 5.5",
+};
+
+const SERVICE_TYPE_ICONS: Record<string, string> = {
+  video_consult:
+    "M15.5 10.4 20.5 7.5v9l-5-2.9M4.5 6.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z",
+  home_visit:
+    "M3.5 10.7 12 3.5l8.5 7.2M5.8 9.6V19.6a1 1 0 0 0 1 1H10v-5.4h4v5.4h3.2a1 1 0 0 0 1-1V9.6",
+  clinic_consult:
+    "M5 20.5h14M6.5 20.5V6a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v14.5M12 8.5v5M9.5 11h5",
+  emergency: "M12 4.5 20.5 19.5H3.5zM12 10v4M12 16.6h.01",
+  followup:
+    "M19.5 9.5A7.5 7.5 0 0 0 6.4 6.4L4.5 8.3M4.5 14.5a7.5 7.5 0 0 0 13.1 3.1l1.9-1.9M4.5 4.5v4h4M19.5 19.5v-4h-4",
+};
+
 export default function VetDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -116,6 +225,8 @@ export default function VetDashboard() {
   const [editingService, setEditingService] = useState<VetService | null>(null);
   const [showServiceForm, setShowServiceForm] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [handoffs, setHandoffs] = useState<AIHandoff[]>([]);
+  const [handoffPhotos, setHandoffPhotos] = useState<Record<string, string[]>>({});
   const vetIdRef = useRef<string | null>(null);
 
   const supabase = createClient();
@@ -181,6 +292,11 @@ export default function VetDashboard() {
       supabase.from("reviews").select("*").eq("vet_id", vetData.id).order("created_at", { ascending: false })
     );
 
+    const handoffsData = await safeQuery<AIHandoff[]>(
+      supabase.from("ai_handoffs").select("*").eq("vet_id", vetData.id).order("created_at", { ascending: false }).limit(50)
+    );
+    let handoffProfiles = new Map<string, { name: string }>();
+
     const bookingOwnerIds = (bookingsData || []).map((b) => b.owner_id as string).filter(Boolean);
     const reviewOwnerIds = (reviewsData || []).map((r) => r.owner_id as string).filter(Boolean);
     const allOwnerIds = [...new Set([...bookingOwnerIds, ...reviewOwnerIds])];
@@ -216,6 +332,55 @@ export default function VetDashboard() {
       ...r,
       profiles: ownerProfilesMap.get(r.owner_id as string) || null,
     }));
+
+    const handoffOwnerIds = (handoffsData || []).map((h) => h.user_id).filter(Boolean);
+    if (handoffOwnerIds.length > 0) {
+      const ownerProfiles = await safeQuery<{ id: string; name: string }[]>(
+        supabase.from("profiles").select("id, name").in("id", handoffOwnerIds)
+      );
+      handoffProfiles = new Map((ownerProfiles || []).map((p) => [p.id, p]));
+    }
+    setHandoffs(
+      (handoffsData || []).map((h) => ({
+        ...h,
+        triage_snapshot: h.triage_snapshot
+          ? {
+              ...h.triage_snapshot,
+              observations: toStringArray(h.triage_snapshot.observations),
+              red_flags: toStringArray(h.triage_snapshot.red_flags),
+            }
+          : h.triage_snapshot,
+        profiles: handoffProfiles.get(h.user_id) || null,
+      }))
+    );
+
+    // Load photos shared in handoff sessions (requires migration 008 policies)
+    const handoffSessions = (handoffsData || []).map((h) => h.session_id).filter(Boolean);
+    if (handoffSessions.length > 0) {
+      const media = await safeQuery<{ session_id: string; storage_path: string }[]>(
+        supabase
+          .from("ai_care_media")
+          .select("session_id, storage_path")
+          .in("session_id", handoffSessions)
+          .limit(30)
+      );
+      const photoMap: Record<string, string[]> = {};
+      await Promise.all(
+        (media || []).map(async (m) => {
+          try {
+            const { data } = await supabase.storage
+              .from("pet-care-media")
+              .createSignedUrl(m.storage_path, 3600);
+            if (data?.signedUrl) {
+              photoMap[m.session_id] = [...(photoMap[m.session_id] || []), data.signedUrl];
+            }
+          } catch {
+            // Storage policy not applied yet — skip photos gracefully
+          }
+        })
+      );
+      setHandoffPhotos(photoMap);
+    }
 
     setBookings(finalBookings);
     setServices(servicesData || []);
@@ -303,6 +468,13 @@ export default function VetDashboard() {
           ? { ...b, status: status as Booking["status"] }
           : b
       )
+    );
+  };
+
+  const updateHandoffStatus = async (handoffId: string, status: string) => {
+    await supabase.from("ai_handoffs").update({ status }).eq("id", handoffId);
+    setHandoffs((prev) =>
+      prev.map((h) => (h.id === handoffId ? { ...h, status } : h))
     );
   };
 
@@ -504,80 +676,65 @@ export default function VetDashboard() {
   }
 
   return (
-    <div style={{ padding: "40px 0 84px" }}>
-      <div className="wrap">
-        {/* Header */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 32,
-            flexWrap: "wrap",
-            gap: 16,
-          }}
-        >
-          <div>
-            <h1 style={{ fontSize: "clamp(1.6rem, 3vw, 2.2rem)" }}>
-              Vet Dashboard
-            </h1>
-            <p
-              style={{
-                color: "var(--ink-soft)",
-                fontSize: "0.94rem",
-                marginTop: 4,
-              }}
-            >
-              Manage bookings, services, and your profile.
-            </p>
+    <div className="dv-page">
+      <div className="dv-shell">
+        {/* Left navigation */}
+        <aside className="dv-side">
+          <nav className="dv-nav" aria-label="Dashboard sections">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                className={`dv-nav-item ${activeTab === tab.id ? "active" : ""}`}
+                aria-current={activeTab === tab.id ? "page" : undefined}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span className="dv-nav-ico">
+                  <Ico d={SIDEBAR_ICONS[tab.id]} />
+                </span>
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        <div className="dv-main">
+          {/* Hero header */}
+          <div className="dv-hero">
+            <div>
+              <h1 className="dv-title">
+                Vet Dashboard
+                <span className="dv-wave" aria-hidden="true">
+                  👋
+                </span>
+              </h1>
+              <p className="dv-sub">
+                Manage bookings, services, and your profile.
+              </p>
+            </div>
+            <div className="dv-status">
+              <label className={`dv-pill ${online ? "on" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={online}
+                  onChange={(e) => toggleOnline(e.target.checked)}
+                />
+                <span className="dv-dot" aria-hidden="true" />
+                <span>Online</span>
+              </label>
+              <label className={`dv-pill ${accepting ? "on" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={accepting}
+                  onChange={(e) => toggleAccepting(e.target.checked)}
+                />
+                <span className="dv-check" aria-hidden="true" />
+                <span>Accepting bookings</span>
+              </label>
+              <button className="dv-logout" onClick={handleLogout}>
+                Log out
+              </button>
+            </div>
           </div>
-          <div
-            style={{
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: "0.9rem",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={online}
-                onChange={(e) => toggleOnline(e.target.checked)}
-                style={{ accentColor: "var(--deep)" }}
-              />
-              Online
-            </label>
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: "0.9rem",
-                cursor: "pointer",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={accepting}
-                onChange={(e) => toggleAccepting(e.target.checked)}
-                style={{ accentColor: "var(--deep)" }}
-              />
-              Accepting bookings
-            </label>
-            <button className="btn-ghost" onClick={handleLogout}>
-              Log out
-            </button>
-          </div>
-        </div>
 
         {/* Onboarding prompt */}
         {vet && !vet.onboarding_completed && (
@@ -623,174 +780,138 @@ export default function VetDashboard() {
           </div>
         )}
 
-        {/* Tabs */}
-        <div className="tab-nav">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              className={`tab-btn ${activeTab === tab.id ? "active" : ""}`}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
         {/* ─── Overview ─── */}
         {activeTab === "overview" && (
           <div>
-            <div
-              className="stats-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4, 1fr)",
-                gap: 16,
-                marginBottom: 28,
-              }}
-            >
+            <div className="dv-stats">
               {[
                 {
                   label: "Total Bookings",
                   value: bookings.length,
-                  accent: false,
+                  icon: ICONS.calendar,
+                  tone: "sage",
                 },
                 {
                   label: "Completed",
                   value: bookings.filter((b) => b.status === "completed")
                     .length,
-                  accent: true,
+                  icon: ICONS.check,
+                  tone: "green",
                 },
                 {
                   label: "Pending",
                   value: bookings.filter((b) => b.status === "pending").length,
-                  accent: false,
+                  icon: ICONS.clock,
+                  tone: "amber",
                 },
                 {
                   label: "Earnings",
                   value: formatPrice(totalEarnings),
-                  accent: false,
+                  icon: ICONS.wallet,
+                  tone: "amber",
                 },
                 {
                   label: "Rating",
                   value: avgRating > 0 ? avgRating.toFixed(1) : "–",
-                  accent: true,
+                  icon: ICONS.star,
+                  tone: "amber",
                 },
                 {
                   label: "Reviews",
                   value: reviewCount,
-                  accent: false,
+                  icon: ICONS.message,
+                  tone: "sage",
                 },
               ].map((stat) => (
-                <div
-                  key={stat.label}
-                  className="card"
-                  style={{ padding: 18, textAlign: "center" }}
-                >
-                  <div
-                    style={{
-                      fontFamily: "var(--font-fraunces), Fraunces, serif",
-                      fontSize: "1.6rem",
-                      fontWeight: 600,
-                      color: stat.accent ? "var(--amber-dark)" : "var(--ink)",
-                    }}
+                <div key={stat.label} className="card dv-stat">
+                  <span
+                    className={`dv-stat-ico ${stat.tone}`}
+                    aria-hidden="true"
                   >
-                    {stat.value}
-                  </div>
-                  <div
-                    style={{
-                      color: "var(--ink-soft)",
-                      fontSize: "0.85rem",
-                      marginTop: 2,
-                    }}
-                  >
-                    {stat.label}
+                    <Ico d={stat.icon} />
+                  </span>
+                  <div className="dv-stat-body">
+                    <div className="dv-stat-num">{stat.value}</div>
+                    <div className="dv-stat-label">{stat.label}</div>
                   </div>
                 </div>
               ))}
             </div>
 
             {/* Quick actions */}
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                marginBottom: 28,
-                flexWrap: "wrap",
-              }}
-            >
+            <div className="dv-actions">
               <button
-                className="btn-primary"
+                className="btn-primary dv-act"
                 onClick={() => setActiveTab("bookings")}
               >
+                <Ico d={ICONS.calendar} size={17} />
                 View Bookings
+                <Ico d={ICONS.arrow} size={16} cls="dv-arrow" />
               </button>
               <button
-                className="btn-secondary"
+                className="btn-secondary dv-act"
                 onClick={() => setActiveTab("services")}
               >
+                <Ico d={ICONS.box} size={17} />
                 Manage Services
               </button>
               <button
-                className="btn-secondary"
+                className="btn-secondary dv-act"
                 onClick={() => setActiveTab("availability")}
               >
+                <Ico d={ICONS.clock} size={17} />
                 Edit Availability
               </button>
             </div>
 
             {/* Recent bookings */}
-            <h3 style={{ fontSize: "1.1rem", marginBottom: 14 }}>
-              Recent Bookings
-            </h3>
+            <div className="dv-section-head">
+              <h3>Recent Bookings</h3>
+            </div>
             {bookings.length === 0 ? (
-              <div
-                style={{
-                  color: "var(--ink-soft)",
-                  padding: 40,
-                  textAlign: "center",
-                }}
-              >
+              <div className="dv-empty">
                 No bookings yet. When pet owners book you, they&apos;ll appear
                 here.
               </div>
             ) : (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                }}
-              >
+              <div className="dv-rows">
                 {bookings.slice(0, 5).map((b) => (
-                  <div
-                    key={b.id}
-                    className="card"
-                    style={{
-                      padding: "14px 18px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                      gap: 10,
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: "0.95rem" }}>
-                        {b.profiles?.name || "Pet Owner"}
-                      </div>
-                      <div
-                        style={{
-                          color: "var(--ink-soft)",
-                          fontSize: "0.85rem",
-                          marginTop: 2,
-                        }}
-                      >
-                        {b.pets?.name} ·{" "}
-                        {SERVICE_LABELS[b.service_type] || b.service_type} ·{" "}
-                        {formatDate(b.scheduled_at)}
-                      </div>
+                  <div key={b.id} className="card dv-row">
+                    <span className="dv-avatar" aria-hidden="true">
+                      {ownerInitials(b.profiles?.name)}
+                    </span>
+                    <div className="dv-row-who">
+                      <strong>{b.profiles?.name || "Pet Owner"}</strong>
+                      <span>
+                        {b.pets?.name
+                          ? `${b.pets.name}${
+                              b.pets.species ? ` · ${b.pets.species}` : ""
+                            }`
+                          : `Booking ${b.booking_reference}`}
+                      </span>
                     </div>
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <div className="dv-row-when">
+                      <span>
+                        <Ico d={ICONS.calendar} size={14} />
+                        {formatDate(b.scheduled_at)}
+                      </span>
+                      <span>
+                        <Ico d={ICONS.clock} size={14} />
+                        {formatTime(b.scheduled_at)}
+                      </span>
+                    </div>
+                    <div className="dv-row-type">
+                      <Ico
+                        d={
+                          SERVICE_TYPE_ICONS[b.service_type] || ICONS.calendar
+                        }
+                        size={15}
+                      />
+                      <span>
+                        {SERVICE_LABELS[b.service_type] || b.service_type}
+                      </span>
+                    </div>
+                    <div className="dv-row-badges">
                       {b.urgency && <UrgencyBadge urgency={b.urgency} />}
                       <StatusBadge status={b.status} />
                     </div>
@@ -903,7 +1024,11 @@ export default function VetDashboard() {
                                 fontSize: "0.88rem",
                               }}
                             >
-                              Pet: {b.pets?.name} ({b.pets?.species}) ·{" "}
+                              {b.pets?.name
+                                ? `Pet: ${b.pets.name} (${
+                                    b.pets.species || "pet"
+                                  }) · `
+                                : ""}
                               {SERVICE_LABELS[b.service_type] || b.service_type}
                             </div>
                             <div
@@ -1103,6 +1228,271 @@ export default function VetDashboard() {
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        )}
+
+        {/* ─── AI Handoffs ─── */}
+        {activeTab === "ai-handoffs" && (
+          <div>
+            <div style={{ marginBottom: 18 }}>
+              <h2
+                style={{
+                  fontFamily: "var(--font-fraunces), Fraunces, serif",
+                  fontSize: "1.35rem",
+                  color: "var(--deep)",
+                  marginBottom: 4,
+                }}
+              >
+                AI Care Handoffs
+              </h2>
+              <p style={{ fontSize: "0.9rem", color: "var(--ink-soft)" }}>
+                Case summaries sent to you by pet owners through the PetTails AI Care Assistant.
+              </p>
+            </div>
+
+            {handoffs.length === 0 ? (
+              <div
+                style={{
+                  padding: "40px 20px",
+                  textAlign: "center",
+                  border: "1px dashed var(--line)",
+                  borderRadius: "var(--radius-m)",
+                  background: "var(--white)",
+                }}
+              >
+                <div style={{ fontSize: "1.6rem", marginBottom: 8 }}>🤖</div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                  No AI handoffs yet
+                </div>
+                <div style={{ fontSize: "0.9rem", color: "var(--ink-soft)" }}>
+                  When owners use the AI Care Assistant and are routed to you,
+                  their case summaries will appear here.
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 14 }}>
+                {handoffs.map((h) => {
+                  const urgencyStyle =
+                    h.urgency === "emergency"
+                      ? { bg: "#B3363F18", text: "#B3363F" }
+                      : h.urgency === "urgent"
+                        ? { bg: "#C9727A18", text: "#C9727A" }
+                        : h.urgency === "moderate" || h.urgency === "uncertain"
+                          ? { bg: "#E4A13B18", text: "#C6842A" }
+                          : { bg: "#4C8B5B18", text: "#4C8B5B" };
+                  const statusColors: Record<string, { bg: string; text: string }> = {
+                    pending: { bg: "#E4A13B18", text: "#C6842A" },
+                    accepted: { bg: "#12383218", text: "#123832" },
+                    completed: { bg: "#4C8B5B18", text: "#4C8B5B" },
+                    declined: { bg: "#C9727A18", text: "#C9727A" },
+                  };
+                  const sc = statusColors[h.status] || statusColors.pending;
+                  return (
+                    <div
+                      key={h.id}
+                      style={{
+                        border: "1px solid var(--line)",
+                        borderRadius: "var(--radius-m)",
+                        background: "var(--white)",
+                        padding: "16px 18px",
+                        display: "grid",
+                        gap: 10,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: 100,
+                            fontSize: "0.74rem",
+                            fontWeight: 700,
+                            background: urgencyStyle.bg,
+                            color: urgencyStyle.text,
+                            textTransform: "capitalize",
+                          }}
+                        >
+                          {h.urgency || "unknown"} urgency
+                        </span>
+                        <span
+                          style={{
+                            padding: "3px 10px",
+                            borderRadius: 100,
+                            fontSize: "0.74rem",
+                            fontWeight: 700,
+                            background: sc.bg,
+                            color: sc.text,
+                            textTransform: "capitalize",
+                          }}
+                        >
+                          {h.status}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "0.82rem",
+                            color: "var(--ink-soft)",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {h.specialty || "General Veterinary"}
+                        </span>
+                        <span
+                          style={{
+                            marginLeft: "auto",
+                            fontSize: "0.8rem",
+                            color: "var(--ink-soft)",
+                          }}
+                        >
+                          {h.profiles?.name || "Owner"} ·{" "}
+                          {new Date(h.created_at).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                          })}
+                        </span>
+                      </div>
+
+                      {h.pet_snapshot && (h.pet_snapshot.name || h.pet_snapshot.species) && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {[
+                            h.pet_snapshot.name && `🐾 ${h.pet_snapshot.name}`,
+                            h.pet_snapshot.species,
+                            h.pet_snapshot.breed,
+                            h.pet_snapshot.age,
+                          ]
+                            .filter(Boolean)
+                            .map((chip, i) => (
+                              <span
+                                key={i}
+                                style={{
+                                  fontSize: "0.76rem",
+                                  fontWeight: 600,
+                                  color: "var(--deep)",
+                                  background: "#12383214",
+                                  padding: "3px 10px",
+                                  borderRadius: 100,
+                                }}
+                              >
+                                {chip}
+                              </span>
+                            ))}
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          fontSize: "0.9rem",
+                          lineHeight: 1.6,
+                          color: "var(--ink)",
+                          background: "var(--paper)",
+                          border: "1px solid var(--line)",
+                          borderRadius: "var(--radius-s)",
+                          padding: "12px 14px",
+                          whiteSpace: "pre-wrap",
+                        }}
+                      >
+                        {h.case_summary || "No summary available."}
+                      </div>
+
+                      {h.triage_snapshot?.red_flags && h.triage_snapshot.red_flags.length > 0 && (
+                        <div
+                          style={{
+                            fontSize: "0.84rem",
+                            background: "#C9727A14",
+                            border: "1px solid #C9727A44",
+                            borderRadius: "var(--radius-s)",
+                            padding: "10px 13px",
+                          }}
+                        >
+                          <strong style={{ color: "#B3363F" }}>🚩 Red flags: </strong>
+                          {h.triage_snapshot.red_flags.join(" · ")}
+                        </div>
+                      )}
+
+                      {h.triage_snapshot?.observations &&
+                        h.triage_snapshot.observations.length > 0 && (
+                          <div
+                            style={{
+                              fontSize: "0.84rem",
+                              background: "#12383210",
+                              border: "1px solid #12383233",
+                              borderRadius: "var(--radius-s)",
+                              padding: "10px 13px",
+                            }}
+                          >
+                            <strong style={{ color: "var(--deep)" }}>👁 Observations: </strong>
+                            {h.triage_snapshot.observations.join(" · ")}
+                          </div>
+                        )}
+
+                      {(handoffPhotos[h.session_id] || []).length > 0 && (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {(handoffPhotos[h.session_id] || []).map((url, i) => (
+                            <a key={i} href={url} target="_blank" rel="noreferrer">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={url}
+                                alt={`Shared photo ${i + 1}`}
+                                style={{
+                                  width: 74,
+                                  height: 74,
+                                  objectFit: "cover",
+                                  borderRadius: 8,
+                                  border: "1px solid var(--line)",
+                                }}
+                              />
+                            </a>
+                          ))}
+                        </div>
+                      )}
+
+                      {h.status === "pending" && (
+                        <div style={{ display: "flex", gap: 9 }}>
+                          <button
+                            className="btn-primary"
+                            style={{
+                              padding: "8px 16px",
+                              fontSize: "0.85rem",
+                              background: "#4C8B5B",
+                            }}
+                            onClick={() => updateHandoffStatus(h.id, "accepted")}
+                          >
+                            ✓ Accept
+                          </button>
+                          <button
+                            className="btn-danger"
+                            style={{ fontSize: "0.85rem" }}
+                            onClick={() => updateHandoffStatus(h.id, "declined")}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      )}
+                      {h.status === "accepted" && (
+                        <div style={{ display: "flex", gap: 9 }}>
+                          <button
+                            className="btn-primary"
+                            style={{
+                              padding: "8px 16px",
+                              fontSize: "0.85rem",
+                              background: "#4C8B5B",
+                            }}
+                            onClick={() => updateHandoffStatus(h.id, "completed")}
+                          >
+                            ✓ Mark reviewed
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}
@@ -1344,14 +1734,513 @@ export default function VetDashboard() {
             <VerificationPanel vet={vet} onSubmit={handleSubmitVerification} />
           </div>
         )}
+        </div>
       </div>
 
       <style>{`
-        @media (max-width: 768px) {
-          .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+        .dv-page {
+          padding: 36px 0 84px;
         }
-        @media (max-width: 480px) {
-          .stats-grid { grid-template-columns: 1fr !important; }
+        .dv-shell {
+          width: min(1440px, calc(100% - 48px));
+          margin: 0 auto;
+          display: grid;
+          grid-template-columns: 244px minmax(0, 1fr);
+          gap: 34px;
+          align-items: start;
+        }
+        .dv-main {
+          min-width: 0;
+        }
+
+        /* ── Left sidebar nav ── */
+        .dv-side {
+          position: sticky;
+          top: 88px;
+          background: linear-gradient(180deg, #F7F5EA 0%, #F2EFE2 100%);
+          border: 1px solid rgba(28, 42, 33, 0.09);
+          border-radius: 22px;
+          padding: 14px;
+        }
+        .dv-nav {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .dv-nav-item {
+          display: flex;
+          align-items: center;
+          gap: 11px;
+          width: 100%;
+          padding: 10px 12px;
+          border: none;
+          background: none;
+          border-radius: 13px;
+          font-size: 0.93rem;
+          font-weight: 500;
+          color: var(--ink-soft);
+          cursor: pointer;
+          text-align: left;
+          transition: background 0.16s, color 0.16s, box-shadow 0.16s;
+        }
+        .dv-nav-item:hover {
+          background: rgba(255, 253, 248, 0.85);
+          color: var(--ink);
+        }
+        .dv-nav-item.active {
+          background: var(--white);
+          color: var(--deep);
+          font-weight: 600;
+          box-shadow: 0 1px 2px rgba(20, 45, 32, 0.07), 0 8px 18px -10px rgba(20, 45, 32, 0.3);
+        }
+        .dv-nav-ico {
+          display: grid;
+          place-items: center;
+          width: 30px;
+          height: 30px;
+          border-radius: 9px;
+          background: rgba(18, 56, 50, 0.07);
+          color: inherit;
+          flex: none;
+        }
+        .dv-nav-item.active .dv-nav-ico {
+          background: rgba(18, 56, 50, 0.12);
+          color: var(--deep);
+        }
+
+        /* ── Hero ── */
+        .dv-hero {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 18px;
+          flex-wrap: wrap;
+          margin-bottom: 26px;
+        }
+        .dv-title {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: clamp(1.7rem, 2.4vw, 2.25rem);
+        }
+        .dv-wave {
+          font-size: 0.8em;
+        }
+        .dv-sub {
+          color: var(--ink-soft);
+          font-size: 0.95rem;
+          margin-top: 6px;
+        }
+        .dv-status {
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          flex-wrap: wrap;
+        }
+        .dv-pill {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          padding: 9px 15px;
+          border-radius: 999px;
+          background: var(--white);
+          border: 1px solid rgba(28, 42, 33, 0.14);
+          font-size: 0.88rem;
+          font-weight: 600;
+          color: #26382E;
+          cursor: pointer;
+          user-select: none;
+          transition: background 0.16s, border-color 0.16s, box-shadow 0.16s;
+        }
+        .dv-pill:hover {
+          border-color: rgba(18, 56, 50, 0.35);
+          box-shadow: 0 2px 8px rgba(20, 45, 32, 0.07);
+        }
+        .dv-pill input {
+          position: absolute;
+          opacity: 0;
+          width: 1px;
+          height: 1px;
+          margin: 0;
+        }
+        .dv-pill:focus-within {
+          outline: 2px solid rgba(18, 56, 50, 0.55);
+          outline-offset: 2px;
+        }
+        .dv-pill.on {
+          background: #EDF4EC;
+          border-color: #BCD6C2;
+        }
+        .dv-dot {
+          width: 9px;
+          height: 9px;
+          border-radius: 50%;
+          background: #A9AEA4;
+          flex: none;
+          transition: background 0.16s, box-shadow 0.16s;
+        }
+        .dv-pill.on .dv-dot {
+          background: #4C8B5B;
+          box-shadow: 0 0 0 3px rgba(76, 139, 91, 0.18);
+        }
+        .dv-check {
+          width: 16px;
+          height: 16px;
+          border-radius: 5px;
+          border: 1.5px solid rgba(28, 42, 33, 0.4);
+          display: grid;
+          place-items: center;
+          flex: none;
+          transition: background 0.15s, border-color 0.15s;
+        }
+        .dv-check::after {
+          content: "";
+          width: 8px;
+          height: 4.5px;
+          border-left: 2px solid #fff;
+          border-bottom: 2px solid #fff;
+          transform: rotate(-45deg) translateY(-1px) scale(0);
+          transition: transform 0.15s;
+        }
+        .dv-pill.on .dv-check {
+          background: var(--deep);
+          border-color: var(--deep);
+        }
+        .dv-pill.on .dv-check::after {
+          transform: rotate(-45deg) translateY(-1px) scale(1);
+        }
+        .dv-logout {
+          padding: 9px 16px;
+          border-radius: 999px;
+          border: 1px solid rgba(28, 42, 33, 0.22);
+          background: transparent;
+          color: var(--ink-soft);
+          font-size: 0.88rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.16s, color 0.16s, border-color 0.16s;
+        }
+        .dv-logout:hover {
+          background: var(--ink);
+          border-color: var(--ink);
+          color: var(--white);
+        }
+
+        /* ── Stats ── */
+        .dv-stats {
+          display: grid;
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+          gap: 14px;
+          margin-bottom: 26px;
+        }
+        .dv-page .card.dv-stat {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 15px 14px;
+        }
+        .dv-stat-ico {
+          width: 42px;
+          height: 42px;
+          border-radius: 13px;
+          display: grid;
+          place-items: center;
+          flex: none;
+        }
+        .dv-stat-ico.sage {
+          background: #E5E9DC;
+          color: #5E7A64;
+        }
+        .dv-stat-ico.green {
+          background: #D8EBDC;
+          color: #35694A;
+        }
+        .dv-stat-ico.amber {
+          background: #F8E8CD;
+          color: #B67A22;
+        }
+        .dv-stat-num {
+          font-family: 'Fraunces', serif;
+          font-size: 1.32rem;
+          font-weight: 600;
+          color: var(--ink);
+          line-height: 1.15;
+        }
+        .dv-stat-label {
+          font-size: 0.76rem;
+          color: var(--ink-soft);
+          font-weight: 500;
+          margin-top: 2px;
+        }
+
+        /* ── Buttons (scoped restyle) ── */
+        .dv-page .btn-primary,
+        .dv-page .btn-secondary,
+        .dv-page .btn-amber,
+        .dv-page .btn-danger,
+        .dv-page .btn-ghost {
+          border-radius: 12px;
+          transition: background 0.16s, color 0.16s, border-color 0.16s, transform 0.16s, box-shadow 0.16s;
+        }
+        .dv-page .btn-primary {
+          box-shadow: 0 8px 18px -10px rgba(13, 43, 38, 0.6);
+        }
+        .dv-page .btn-primary:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 12px 22px -10px rgba(13, 43, 38, 0.55);
+        }
+        .dv-page .btn-secondary {
+          border-color: rgba(28, 42, 33, 0.3);
+        }
+        .dv-page .btn-secondary:hover {
+          border-color: var(--ink);
+        }
+        .dv-actions {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin-bottom: 30px;
+        }
+        .dv-act {
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+        }
+        .dv-act .dv-arrow {
+          transition: transform 0.16s;
+        }
+        .dv-act:hover .dv-arrow {
+          transform: translateX(3px);
+        }
+
+        /* ── Section head + booking rows ── */
+        .dv-section-head {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+        .dv-rows {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .dv-page .card.dv-row {
+          display: grid;
+          grid-template-columns: auto minmax(150px, 1.3fr) minmax(170px, auto) minmax(150px, auto) auto;
+          align-items: center;
+          gap: 14px;
+          padding: 14px 18px;
+          transition: box-shadow 0.16s, transform 0.16s;
+        }
+        .dv-page .card.dv-row:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 12px 26px -14px rgba(20, 45, 32, 0.4);
+        }
+        .dv-avatar {
+          width: 42px;
+          height: 42px;
+          border-radius: 50%;
+          background: #E2E9DF;
+          border: 1px solid rgba(47, 94, 67, 0.18);
+          color: #2F5E43;
+          display: grid;
+          place-items: center;
+          font-size: 0.82rem;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          flex: none;
+        }
+        .dv-row-who {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          min-width: 0;
+        }
+        .dv-row-who strong {
+          font-size: 0.95rem;
+          font-weight: 600;
+          color: var(--ink);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .dv-row-who span {
+          font-size: 0.83rem;
+          color: var(--ink-soft);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .dv-row-when {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          font-size: 0.84rem;
+          color: var(--ink-soft);
+        }
+        .dv-row-when span {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          white-space: nowrap;
+        }
+        .dv-row-when svg {
+          flex: none;
+          opacity: 0.75;
+        }
+        .dv-row-type {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          font-size: 0.83rem;
+          font-weight: 600;
+          color: #33463B;
+          background: var(--paper);
+          border: 1px solid rgba(28, 42, 33, 0.07);
+          padding: 7px 12px;
+          border-radius: 999px;
+          white-space: nowrap;
+          justify-self: start;
+        }
+        .dv-row-badges {
+          display: flex;
+          gap: 6px;
+          align-items: center;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+        }
+        .dv-empty {
+          padding: 44px 20px;
+          text-align: center;
+          color: var(--ink-soft);
+          font-size: 0.92rem;
+          border: 1px dashed var(--line);
+          border-radius: var(--radius-m);
+          background: rgba(255, 253, 248, 0.55);
+        }
+
+        /* ── Shared component restyles ── */
+        .dv-page .card {
+          border-color: rgba(28, 42, 33, 0.07);
+          border-radius: 18px;
+          box-shadow: 0 1px 2px rgba(20, 45, 32, 0.04), 0 14px 30px -24px rgba(20, 45, 32, 0.4);
+        }
+        .dv-page h3 {
+          color: var(--deep);
+        }
+        .dv-page .field input,
+        .dv-page .field select,
+        .dv-page .field textarea {
+          background: #F4F2E9;
+          border: 1px solid transparent;
+          border-radius: 12px;
+          padding: 12px 14px;
+        }
+        .dv-page .field input:focus,
+        .dv-page .field select:focus,
+        .dv-page .field textarea:focus {
+          background: var(--white);
+          border-color: rgba(18, 56, 50, 0.5);
+          box-shadow: 0 0 0 3px rgba(18, 56, 50, 0.12);
+        }
+        .dv-page .filter-btn {
+          font-size: 0.87rem;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 1400px) {
+          .dv-stats {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+        }
+        @media (max-width: 1180px) {
+          .dv-shell {
+            grid-template-columns: 218px minmax(0, 1fr);
+            gap: 24px;
+          }
+        }
+        @media (max-width: 960px) {
+          .dv-shell {
+            grid-template-columns: minmax(0, 1fr);
+            gap: 22px;
+          }
+          .dv-side {
+            position: static;
+            padding: 10px;
+          }
+          .dv-nav {
+            flex-direction: row;
+            overflow-x: auto;
+            gap: 6px;
+            padding-bottom: 2px;
+          }
+          .dv-nav-item {
+            flex: none;
+            width: auto;
+            white-space: nowrap;
+            padding: 9px 14px;
+            border-radius: 999px;
+          }
+        }
+        @media (max-width: 760px) {
+          .dv-stats {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .dv-page .card.dv-row {
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            grid-template-areas:
+              "av who badges"
+              "when when type";
+            row-gap: 10px;
+          }
+          .dv-avatar { grid-area: av; }
+          .dv-row-who { grid-area: who; }
+          .dv-row-badges { grid-area: badges; }
+          .dv-row-when {
+            grid-area: when;
+            flex-direction: row;
+            gap: 16px;
+          }
+          .dv-row-type {
+            grid-area: type;
+            justify-self: end;
+          }
+        }
+        @media (max-width: 560px) {
+          .dv-page {
+            padding: 24px 0 64px;
+          }
+          .dv-shell {
+            width: min(1440px, calc(100% - 32px));
+          }
+          .dv-title {
+            font-size: 1.55rem;
+          }
+          .dv-stats {
+            grid-template-columns: minmax(0, 1fr);
+          }
+          .dv-page .card.dv-row {
+            grid-template-columns: auto minmax(0, 1fr);
+            grid-template-areas:
+              "av who"
+              "badges badges"
+              "when when"
+              "type type";
+          }
+          .dv-row-badges {
+            justify-content: flex-start;
+          }
+          .dv-row-type {
+            justify-self: start;
+          }
+          .dv-actions .btn-primary,
+          .dv-actions .btn-secondary {
+            flex: 1;
+            justify-content: center;
+          }
         }
       `}</style>
     </div>
